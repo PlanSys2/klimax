@@ -1,0 +1,182 @@
+# Plan de Klimax, un planificador HTN para HDDL 2.1
+
+Estado: H0 en curso (2026-11-23). Nombre: **Klimax**
+(decisiones en la sección 7). Este documento sigue el esquema de `plan.md` (Kairos).
+
+---
+
+## 1. Qué es HDDL 2.1 hoy
+
+Klimax soporta **HDDL 1.0 completo y HDDL 2.1** (niveles y semántica en `semantics.md`).
+
+- **HDDL 1.0** (Höller et al., AAAI 2020) es el lenguaje estándar de HTN: tareas abstractas,
+  métodos con subtareas ordenadas total o parcialmente, precondiciones de método. Es el lenguaje
+  de las competiciones HTN del IPC 2020 y 2023.
+- **HDDL 2.1** (Pellier, Albore, Fiorino, Bailon-Ruiz; arXiv 2206.01822 y 2306.07353) **es una
+  propuesta, no un estándar cerrado.** Añade acciones durativas, métodos durativos, restricciones
+  de duración y de orden sobre los instantes de inicio y fin de las subtareas (álgebra de puntos:
+  <, ≤, =, ≠), restricciones de descomposición `(at e φ)` con semántica de PDDL 3.0, fluentes
+  numéricos y literales iniciales temporizados.
+- Lo que la propuesta deja abierto: la sintaxis definitiva (hay una BNF en LaTeX en
+  github.com/pellierd/HDDL2.1), los efectos continuos, los retardos entre subtareas, fechas enteras
+  o racionales, axiomas y preferencias, y la no interferencia entre snap actions concurrentes.
+- El repositorio de la propuesta trae **solo dos problemas de ejemplo** (Satellite y Transport).
+  No hay banco estándar temporal jerárquico, y los propios autores lo dicen.
+
+Consecuencia: quien publique un planificador completo, con una semántica escrita y un banco de
+problemas, fija de hecho la referencia. Es una oportunidad mayor que la que tuvo Kairos, y también
+un riesgo: hay que decidir semántica donde la propuesta calla, y documentarlo.
+
+## 2. Competidores
+
+Verificado en las páginas del IPC y en los repositorios, salvo donde se indica.
+
+| Planificador | Técnica | Alcance | Limitaciones | Estado / licencia |
+|---|---|---|---|---|
+| PandaDealer (Olz, Höller, Bercher) | Progresión grounded con detección de callejones sin salida y look-ahead por precondiciones y efectos inferidos | Ganó las tres categorías de orden total del IPC 2023 | Solo orden total; sin tiempo ni números | Sobre pandaPIengine |
+| PANDApro / pandaPIengine (Höller) | Progresión grounded; heurísticas clásicas sobre la relajación RC, LM-cut, landmarks; variantes SAT y BDD | Ganó orden parcial óptimo en 2023; segundo en casi todo lo demás | Sin tiempo ni números | BSD-3, C++ |
+| Linear Simple / Complex / Lifted (Wu, Olz, Lin, Bercher) | Linealiza el problema de orden parcial y lo resuelve con un planificador de orden total | Ganó orden parcial satisficing y agile en 2023 | Incompleto: una linealización puede perder soluciones | Sobre PANDA |
+| TOAD (Höller) | Compila orden total a clásico con autómatas | Mejor configuración individual en 7 dominios de 2023 | Poco fiable fuera de ellos; solo orden total | — |
+| Lilotane (Schreiber) | SAT lifted por capas | Segundo en orden total 2020 | Solo orden total; sin efectos condicionales ni existenciales | GPL-3, C++ |
+| HyperTensioN (Magnaguagno et al.) | Búsqueda en profundidad lifted, dominio compilado a Ruby | Ganó orden total 2020 | Solo orden total; depende del orden de los métodos | Ruby |
+| SIADEX (Granada) | HTN temporal por progresión, lenguaje propio HPDL | Ganó orden parcial 2020; temporal y numérico | Lenguaje propio; flojo en dominios recursivos con mucha ramificación | — |
+| Aries (Bit-Monnot) | Crónicas sobre CP/SAT con aprendizaje | Segundo en orden parcial óptimo 2023; HDDL, temporal vía UPF | El planificador clásico del repo figura como «deprecated»; el nuevo, «experimental» | Apache-2.0/MIT, Rust |
+| PDDL4J (Pellier, Fiorino) | TFD/PFD, LiftedTreePath, OptiPlan | Participó en 2020 y 2023; tiene el parser de HDDL 2.1 | Sin puestos destacados; el README solo anuncia HDDL 1.0 | LGPL-3, Java |
+| SibylSmt (Quenard et al., HPlan 2026) | SAT de orden total + SMT (Z3) para números | 91/140 en su banco numérico, frente a 48 de Aries y 42 de SIADEX | Solo orden total; acotado | Investigación |
+| pyHiPOP (Lesire, Albore) | POCL jerárquico | Segundo en orden parcial 2020 | Python, lento | — |
+| FAPE, CHIMP, SHOP3 | Temporal jerárquico con lenguajes propios (ANML, etc.) | Referencias históricas | No leen HDDL | *Sin verificar en esta exploración* |
+
+Conclusiones:
+
+1. **Nadie cubre HDDL 2.1.** Los fuertes (PANDA y derivados) son HTN puro, sin tiempo ni números.
+   Los que hacen tiempo (SIADEX, Aries, FAPE) usan otro lenguaje o no escalan. El hueco es el
+   mismo que encontró Kairos en PDDL temporal.
+2. **En HTN puro el listón es alto y está vivo.** PandaDealer y PANDApro son C++ modernos y bien
+   publicados. Superarlos en orden total exige igualar sus técnicas y añadir algo; no basta con
+   ingeniería.
+3. **Nadie es bueno en todo.** Orden total, orden parcial, agile y óptimo los ganan sistemas
+   distintos. Un planificador que analice el problema y elija motor, como hace Kairos, puede ganar
+   en cobertura global sin ganar cada categoría.
+4. **Ninguno es una librería usable.** Son cadenas de ejecutables (parser → grounder → motor) que
+   se comunican por ficheros.
+
+## 3. Bancos de problemas y medida
+
+| Banco | Contenido | Uso |
+|---|---|---|
+| IPC 2020 HTN (`panda-planner-dev/ipc2020-domains`) | 24 dominios de orden total, 9 de orden parcial | Base |
+| IPC 2023 HTN (`ipc2023-htn/ipc2023-domains`) | Los de 2020 más SharpSAT, Lamps, Ultralight-Cockpit y Colouring | **Banco principal**; hay resultados y logs oficiales por instancia |
+| HTN-Numerical-Benchmarks (Quenard) | 7 familias × 20 instancias, con generadores | Parte numérica |
+| HDDL 2.1 (repo de la propuesta) | 2 problemas | Pruebas de sintaxis |
+| **Banco temporal propio** | A crear: dominios del IPC temporizados y dominios de robótica de PlanSys2 | Parte temporal; se publica como contribución |
+
+- Condiciones del IPC: un núcleo, 8 GB, 30 minutos. Puntuación agile
+  (1 si se resuelve en 1 s; si no, 1 − log t / log 1800), satisficing (C*/C) y cobertura.
+- Como en Kairos: mismos límites para todos, todos los planes verificados, informe a 100 ms, 1 s
+  y 30 s. Las cifras oficiales a 30 minutos se citan de los resultados publicados del IPC 2023, y
+  se reejecuta a cada competidor en nuestra máquina con los límites cortos.
+- Verificación: verificador propio, contrastado con el de pandaPIparser (el que usa el IPC).
+- **Objetivo externo: el IPC 2027 tendrá categorías HTN** (organizan Bercher, Yousefi, Med y
+  Barták; aún sin web ni fechas). No hubo categoría HTN en 2026. Presentarse da la comparación
+  estandarizada que se busca, y su convocatoria de dominios es el sitio natural para proponer el
+  banco temporal.
+
+## 4. Diseño propuesto
+
+### 4.1 Relación con Kairos
+
+Planificador nuevo, repositorio propio, C++20, Apache-2.0. Kairos no cambia su comportamiento ni
+su rendimiento. Lo que se reutiliza de Kairos, como librería:
+
+- Parser y diagnósticos (HDDL es PDDL más `:task`, `:method`, `:htn`).
+- Grounding por alcanzabilidad relajada, invariantes y SAS+.
+- Heurísticas clásicas, numéricas y temporales (sobre la relajación del problema HTN).
+- STN incremental y validación temporal y numérica de planes.
+- Resolver subproblemas: una tarea sin método aplicable, o un objetivo `:goal` de HDDL, se pasa a
+  Kairos como problema PDDL.
+
+**Decisión abierta (H0):** hoy Kairos solo exporta la API pública (`kairos.hpp`, `planner.hpp`…).
+Para lo anterior hace falta que exporte también sus componentes internos. Opciones:
+(a) un segundo destino CMake `kairos::core` con cabeceras internas, sin promesa de estabilidad;
+(b) copiar el código. Recomiendo (a): un solo sitio donde arreglar errores, y el único cambio en
+Kairos es de empaquetado.
+
+### 4.2 Motores
+
+Un análisis previo clasifica el problema (orden total o parcial, recursivo, con tiempo, con
+números, con concurrencia requerida) y elige motor, como en Kairos.
+
+| Caso | Motor | Base |
+|---|---|---|
+| Orden total, agile | Profundidad lifted con el orden de métodos, memoización y detección de ciclos | HyperTensioN |
+| Orden total, general | Progresión grounded con efectos y precondiciones inferidos, look-ahead y poda de callejones | PandaDealer |
+| Orden parcial | Primero linealizar y resolver como orden total; si falla, progresión completa de orden parcial | Wu et al.; PANDApro |
+| Heurísticas | Relajación RC (el HTN compilado a clásico relajado) evaluada con hFF, landmarks y LM-cut de Kairos; grafo de descomposición de tareas para podar | PANDApro |
+| Numérico | Progresión con estados numéricos; poda por intervalos | Kairos |
+| Temporal | Snap actions; red temporal sobre inicios y fines de tareas y métodos; compresión cuando el problema es temporalmente simple | Kairos, SIADEX |
+| Óptimo | A* con LM-cut sobre RC | PANDApro |
+
+SAT y SMT (Lilotane, SibylSmt) quedan fuera del primer plan: son acotados y arrastran licencias
+GPL. Se reconsideran si la medida lo pide.
+
+### 4.3 Requisitos de producto
+
+- Ejecutable y librería, con el mismo estilo de API que Kairos: sin estado global, cancelable,
+  anytime con callback, memoria con presupuesto.
+- Salida: plan primitivo y árbol de descomposición en el formato del IPC.
+- `check` y `validate` como órdenes, con diagnósticos de fichero, línea y columna.
+- Después: módulo Python, UPF y plugin de PlanSys2.
+
+## 5. Fases
+
+| Fase | Contenido | Criterio de salida |
+|---|---|---|
+| H0 | Semántica de HDDL 2.1 por escrito; decisión sobre `kairos::core`; infraestructura de medida con PANDA, Lilotane, HyperTensioN, Aries, SIADEX y PDDL4J instalados | Línea base reproducida frente a los resultados del IPC 2023 |
+| H1 | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
+| H2 | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
+| H3 | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
+| H4 | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
+| H5 | Numérico | Más de 91/140 en el banco de Quenard |
+| H6 | Temporal: HDDL 2.1 completo, banco temporal propio | Resuelve el banco; planes validados |
+| H7 | Robustez, fuzzing, banco por característica, Python, UPF, PlanSys2, versión 1.0.0 | Como Kairos |
+| H8 | IPC 2027 y artículo | Según el calendario del IPC |
+
+H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
+
+## 6. Riesgos
+
+- **Semántica no cerrada.** Mitigación: escribirla en H0, discutirla en los issues del repo de la
+  propuesta y con sus autores antes de H6.
+- **Sin banco temporal.** Crearlo es trabajo y puede discutirse su imparcialidad. Mitigación:
+  derivarlo de dominios del IPC, publicar generadores y proponerlo al IPC 2027.
+- **PANDA es un rival serio y activo.** Igualarlo puede llevar más que H2–H4. Mitigación: medir
+  desde H0 y no avanzar sin cumplir el criterio.
+- **El calendario del IPC 2027 no se conoce.** Si llega antes de H6, presentarse solo en HTN puro.
+
+## 7. Decisiones tomadas (2026-11-23)
+
+1. **Nombre: Klimax** (κλῖμαξ, «escalera»; por la jerarquía de tareas). Libre en PyPI (`klimax`,
+   `klimax-planner`), en `PlanSys2/klimax` y en rosdistro; en GitHub solo hay proyectos menores
+   ajenos con ese nombre.
+2. **Repositorio:** `PlanSys2/klimax`, Apache-2.0, privado hasta la primera versión.
+3. **Kairos como librería:** Kairos exporta un destino CMake `kairos::core` con sus cabeceras
+   internas, sin promesa de estabilidad. No se copia código.
+4. **IPC 2027:** uno de los objetivos, no el único. El calendario del proyecto no depende de él.
+5. **Orden de fases: HTN puro primero** (H1–H4), después numérico y temporal. Motivo: el motor
+   temporal es el motor HTN más una red temporal; si el motor HTN es débil, lo temporal hereda su
+   debilidad y hay que rehacerlo. Además, solo HTN puro tiene banco estándar y rivales fuertes
+   contra los que medir, así que es donde se comprueba que el planificador es bueno. La semántica
+   temporal se escribe ya en H0 para que el modelo de datos la contemple desde el principio.
+
+## Fuentes
+
+- https://ipc2023-htn.github.io/ y https://ipc2023-htn.github.io/results
+- https://ipc2020.hierarchical-task.net/
+- https://hierarchical-task.net/ipc
+- https://github.com/ipc2023-htn/ipc2023-domains, https://github.com/panda-planner-dev/ipc2020-domains
+- https://arxiv.org/abs/2206.01822, https://arxiv.org/abs/2306.07353, https://github.com/pellierd/HDDL2.1
+- https://arxiv.org/abs/2609.03938, https://github.com/gaspard-quenard/HTN-Numerical-Benchmarks
+- https://github.com/panda-planner-dev/pandaPIengine, https://github.com/panda-planner-dev/pandaPIparser
+- https://github.com/domschrei/lilotane, https://github.com/Maumagnaguagno/HyperTensioN
+- https://github.com/plaans/aries, https://github.com/pellierd/pddl4j
+- https://onlinelibrary.wiley.com/doi/full/10.1002/aaai.12169 (informe del IPC 2023)

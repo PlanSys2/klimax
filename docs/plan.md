@@ -68,7 +68,7 @@ Conclusiones:
 | IPC 2023 HTN (`ipc2023-htn/ipc2023-domains`) | Los de 2020 más SharpSAT, Lamps, Ultralight-Cockpit y Colouring | **Banco principal**; hay resultados y logs oficiales por instancia |
 | HTN-Numerical-Benchmarks (Quenard) | 7 familias × 20 instancias, con generadores | Parte numérica |
 | HDDL 2.1 (repo de la propuesta) | 2 problemas | Pruebas de sintaxis |
-| **Banco temporal propio** | A crear: dominios del IPC temporizados y dominios de robótica de PlanSys2 | Parte temporal; se publica como contribución |
+| **Banco de referencia propio** | A crear: niveles L1 a L4, ver 3.1 | Partes numérica y temporal; se publica como contribución |
 
 - Condiciones del IPC: un núcleo, 8 GB, 30 minutos. Puntuación agile
   (1 si se resuelve en 1 s; si no, 1 − log t / log 1800), satisficing (C*/C) y cobertura.
@@ -80,6 +80,25 @@ Conclusiones:
   Barták; aún sin web ni fechas). No hubo categoría HTN en 2026. Presentarse da la comparación
   estandarizada que se busca, y su convocatoria de dominios es el sitio natural para proponer el
   banco temporal.
+
+### 3.1 Banco de referencia propio
+
+Además de medirse en los bancos existentes, el proyecto publica un banco de HDDL que cubra los
+cuatro niveles (L1 a L4) y pueda servir de referencia. Va en un repositorio aparte, con licencia
+abierta, y no depende de Klimax.
+
+| Parte | Contenido |
+|---|---|
+| Matriz por característica | Cada dominio declara qué usa (orden total o parcial, recursión, números, duraciones, concurrencia requerida, literales temporizados, restricciones de descomposición), para saber qué cubre cada planificador |
+| Dominios | Los del IPC extendidos con números y tiempo, los de Quenard, los dos ejemplos de la propuesta y dominios de robótica de PlanSys2. Ninguno hecho a medida de Klimax |
+| Generadores | Con semilla y dificultad escalada, para que las instancias se puedan regenerar y ampliar |
+| Verificador independiente | De planes jerárquicos numéricos y temporales, según `docs/semantics.md`. Hoy no existe ninguno |
+| Soluciones de referencia | Mejor plan conocido por instancia, verificado |
+| Resultados | De todo planificador que pueda leer cada nivel, con el arnés publicado y los mismos límites |
+
+Para que sea referencia y no «el banco de Klimax»: la semántica se acuerda con los autores de
+HDDL 2.1, el verificador no comparte código de búsqueda con el planificador, y el banco se propone
+al taller HPlan y a la convocatoria de dominios del IPC 2027. Que se adopte depende de terceros.
 
 ## 4. Diseño propuesto
 

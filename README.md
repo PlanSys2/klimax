@@ -17,6 +17,7 @@ grounder, heuristics, temporal network, validator).
 
 - [docs/semantics.md](docs/semantics.md): the language Klimax accepts and what a solution is.
 - [docs/plan.md](docs/plan.md): state of the art, design and phases.
+- [docs/baseline.md](docs/baseline.md): the existing HTN planners on the IPC 2023 benchmark.
 
 ## Building
 

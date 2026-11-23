@@ -171,13 +171,13 @@ Detalle de H0:
 - ✅ Semántica de HDDL 1.0 y HDDL 2.1 por escrito (`docs/semantics.md`), con las decisiones marcadas.
 - ✅ `kairos::core` en Kairos (PR #8, fusionado).
 - ✅ Repositorio de Klimax con el esqueleto compilando sobre `kairos::core` y sus pruebas.
-- ✅ Once configuraciones de competidores instaladas y verificadas: PANDA, PandaDealer (dos),
+- ✅ Quince configuraciones de competidores instaladas y verificadas: PANDA (cinco), PandaDealer (dos),
   Linear-Simple, Linear-Complex, TOAD, SIADEX, PDDL4J, Lilotane, HyperTensioN y Aries.
 - ✅ Arnés de medida: un núcleo y 8 GB por ejecución, todos los planes verificados.
 - ✅ Línea base a 100 ms y 1 s en el banco del IPC 2023.
-- 🔄 Línea base a 30 s.
-- ⏳ Comparación con los resultados publicados del IPC 2023.
-- ⏳ Resultados de la línea base en la documentación de Klimax.
+- ✅ Línea base a 30 s.
+- ✅ Comparación con los resultados publicados del IPC 2023 (el orden coincide).
+- ✅ Resultados de la línea base en la documentación de Klimax (`docs/baseline.md`).
 - ⏳ Discutir con los autores de HDDL 2.1 las decisiones de semántica (antes de H6).
 - ⏳ Competidores sin medir: configuraciones óptimas, PDDL4J OptiPlan, banco numérico de Quenard.
 

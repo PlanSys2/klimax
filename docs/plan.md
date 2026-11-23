@@ -106,7 +106,11 @@ Kairos es de empaquetado.
 Un análisis previo clasifica el problema (orden total o parcial, recursivo, con tiempo, con
 números, con concurrencia requerida) y elige motor, como en Kairos.
 
-| Caso | Motor | Base |
+Todas las implementaciones son propias. La columna «Idea de» cita el planificador o el artículo
+del que sale la técnica; de ellos no se toma código. El único código reutilizado es el de Kairos,
+a través de `kairos::core`.
+
+| Caso | Motor | Idea de |
 |---|---|---|
 | Orden total, agile | Profundidad lifted con el orden de métodos, memoización y detección de ciclos | HyperTensioN |
 | Orden total, general | Progresión grounded con efectos y precondiciones inferidos, look-ahead y poda de callejones | PandaDealer |

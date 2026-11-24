@@ -20,12 +20,14 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "hddl/model.hpp"
 #include "hddl/parser.hpp"
 #include "kairos/diagnostics.hpp"
+#include "pddl/lexer.hpp"
 #include "search/total_order.hpp"
 #include "tdg/grounder.hpp"
 #include "verify/verifier.hpp"
@@ -54,6 +56,45 @@ void append(
     r.rendered = kairos::to_string(d, source);
     out.push_back(std::move(r));
   }
+}
+
+// Names as first written in the domain or the problem. HDDL does not distinguish case and
+// Klimax works in lower case, but the plan is for tools that may: the verifier of the IPC, in
+// its strict mode, wants the spelling of the input.
+std::string with_original_names(
+  const std::string & plan, std::string_view domain, std::string_view problem)
+{
+  std::unordered_map<std::string, std::string> spelling;
+  for (std::string_view text : {domain, problem}) {
+    for (const kairos::pddl::Token & token : kairos::pddl::tokenize(text)) {
+      if (token.kind == kairos::pddl::TokenKind::Name) {
+        std::string original(token.text);
+        std::string lower = kairos::SymbolTable::to_lower(original);
+        if (lower != original) {
+          spelling.emplace(std::move(lower), std::move(original));
+        }
+      }
+    }
+  }
+  if (spelling.empty()) {
+    return plan;
+  }
+  std::string out;
+  out.reserve(plan.size());
+  size_t at = 0;
+  while (at < plan.size()) {
+    size_t end = at;
+    while (end < plan.size() && plan[end] != ' ' && plan[end] != '\n') {
+      ++end;
+    }
+    auto found = spelling.find(plan.substr(at, end - at));
+    out += found == spelling.end() ? plan.substr(at, end - at) : found->second;
+    if (end < plan.size()) {
+      out += plan[end];
+    }
+    at = end + 1;
+  }
+  return out;
 }
 
 // The first line of `plan` whose action or decomposition is not in the ground problem
@@ -242,7 +283,7 @@ SolveResult solve(
   switch (found.outcome) {
     case search::Outcome::Solved:
       result.status = Status::Solved;
-      result.plan = std::move(found.plan);
+      result.plan = with_original_names(found.plan, domain, problem);
       break;
     case search::Outcome::Unsolvable:
       result.status = Status::Unsolvable;

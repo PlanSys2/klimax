@@ -390,6 +390,39 @@ public:
       std::sscanf(given, "%lu,%lu,%lu,%lu", &share[0], &share[1], &share[2], &share[3]);
     }
     for (uint64_t turn = 4000; ; turn *= 2) {
+      if (linearized_ && (po_over_ || free_ == nullptr) && dfs_over_[1] &&
+        (dfs_over_[0] || relaxed_ == nullptr) && (bfs_[0].over || bfs_[0].relaxed == nullptr) &&
+        (bfs_[1].over || bfs_[1].relaxed == nullptr))
+      {
+        result.outcome = Outcome::Unsolvable;  // not a proof: see total_order()
+        return result;
+      }
+      if (linearized_ && free_ != nullptr && !po_over_ && !po_exhausted_) {
+        limit_ = work_ + turn;
+        const Outcome outcome = partial_order(result);
+        evaluated_ = false;
+        result.expansions = expansions_;
+        if (trace) {
+          std::fprintf(stderr, "partial order: %s, %llu expansions so far, %zu nodes\n",
+            outcome == Outcome::Solved ? "solved" : outcome == Outcome::Unsolvable ? "nothing" :
+            "stopped", static_cast<unsigned long long>(expansions_), po_nodes_.size());
+        }
+        if (outcome == Outcome::Solved) {
+          result.outcome = outcome;
+          result.steps = bf_steps_;
+          result.message = "best first, partial order";
+          return result;
+        }
+        if (outcome == Outcome::Unsolvable) {
+          result.outcome = outcome;  // every interleaving was searched
+          proved_ = true;
+          return result;
+        }
+        if (budget_ != nullptr && budget_->exhausted()) {
+          result.outcome = Outcome::OutOfBudget;
+          return result;
+        }
+      }
       for (Bf & search : bfs_) {
         if (search.relaxed == nullptr || search.over) {
           continue;
@@ -411,6 +444,10 @@ public:
             outcome == Outcome::Solved ? "solved" : outcome == Outcome::Unsolvable ? "nothing" :
             "stopped", static_cast<unsigned long long>(expansions_), search.nodes.size());
         }
+        if (outcome == Outcome::Unsolvable && linearized_) {
+          search.over = true;  // nothing in this order: the other ways go on
+          continue;
+        }
         // The ordered costs put far what they cannot reach instead of dropping it, so an empty
         // list is a proof with either
         if (outcome == Outcome::Solved || outcome == Outcome::Unsolvable) {
@@ -426,7 +463,7 @@ public:
         }
       }
       for (const bool guided : {true, false}) {
-        if (guided && relaxed_ == nullptr) {
+        if ((guided && relaxed_ == nullptr) || dfs_over_[guided ? 0 : 1]) {
           continue;
         }
         guided_ = guided;
@@ -445,6 +482,10 @@ public:
               outcome == Outcome::Solved ? "solved" : outcome == Outcome::Unsolvable ?
               "nothing" : "stopped", static_cast<unsigned long long>(expansions_),
               cut_ ? ", cut" : "");
+          }
+          if (outcome == Outcome::Unsolvable && !cut_ && linearized_) {
+            dfs_over_[guided ? 0 : 1] = true;  // nothing in this order: the other ways go on
+            break;
           }
           if (outcome == Outcome::Solved || (outcome == Outcome::Unsolvable && !cut_)) {
             result.outcome = outcome;  // without cuts, the whole space was searched
@@ -1523,6 +1564,321 @@ private:
     return actions + roots + "\n" + tree + "<==\n";
   }
 
+  // --- Partial order ---------------------------------------------------------------------------
+  // Greedy best-first search over (state, task network), for problems that need the subtasks
+  // of different tasks interleaved. A node holds the tasks still to do and the orderings
+  // between them; any task with nothing before it may go next: an action is executed, an
+  // abstract task is replaced by the network of one of its methods (what came after the task
+  // comes after all of it). Valued with the free relaxation, which ignores order as the
+  // problem does. Keeps what it has between turns.
+
+  struct PoItem
+  {
+    uint32_t task = 0;
+    uint32_t id = 0;  // of this occurrence, in the plan
+  };
+
+  struct PoNode
+  {
+    uint32_t parent = kNone;
+    uint32_t state = 0;        // stored state
+    uint32_t items = 0;        // its network: po_items_[items .. items + item_count)
+    uint32_t item_count = 0;
+    uint32_t edges = 0;        // po_edges_: pairs (a, b) of positions, a before b
+    uint32_t edge_count = 0;
+    // What made it: an action (method kNone) or a decomposition
+    uint32_t did = kNone;      // id of the occurrence
+    uint32_t did_task = 0;
+    uint32_t method = kNone;
+    uint32_t first_child = 0;  // ids of the subtasks, by step of the method
+    uint32_t child_count = 0;
+    bool root = false;
+  };
+
+  uint64_t po_key(const PoNode & node) const
+  {
+    // The same whatever the order the items are stored in
+    uint64_t sum = 0;
+    for (uint32_t i = 0; i < node.item_count; ++i) {
+      sum += mix(uint64_t{po_items_[node.items + i].task} + 0x9e3779b97f4a7c15ull);
+    }
+    for (uint32_t e = 0; e < node.edge_count; ++e) {
+      const auto [a, b] = po_edges_[node.edges + e];
+      sum += mix((uint64_t{po_items_[node.items + a].task} << 32) ^
+          po_items_[node.items + b].task ^ 0x51ed270b5bd1e995ull);
+    }
+    return mix(state_hash_ ^ sum);
+  }
+
+  void po_push(PoNode node, uint64_t h)
+  {
+    po_nodes_.push_back(node);
+    po_open_.emplace_back((std::min<uint64_t>(h, 0xffffffffull) << 32) | po_nodes_.size(),
+      static_cast<uint32_t>(po_nodes_.size() - 1));
+    std::push_heap(po_open_.begin(), po_open_.end(), std::greater<>());
+  }
+
+  // The network of `from` without the item at `position`, with the steps of `method` in its
+  // place (none for an action)
+  void po_replace(const PoNode & from, uint32_t position, const tdg::Method * method, PoNode & to)
+  {
+    const uint32_t steps = method == nullptr ? 0 : static_cast<uint32_t>(method->subtasks.size());
+    to.items = static_cast<uint32_t>(po_items_.size());
+    to.edges = static_cast<uint32_t>(po_edges_.size());
+    // Old positions after `position` move one down; the steps go at the end
+    auto moved = [&](uint32_t old) {return old < position ? old : old - 1;};
+    for (uint32_t i = 0; i < from.item_count; ++i) {
+      if (i != position) {
+        po_items_.push_back(po_items_[from.items + i]);
+      }
+    }
+    const uint32_t first = from.item_count - 1;
+    to.first_child = po_ids_;
+    to.child_count = steps;
+    for (uint32_t k = 0; k < steps; ++k) {
+      po_items_.push_back(PoItem{method->subtasks[k], po_ids_++});
+    }
+    for (uint32_t e = 0; e < from.edge_count; ++e) {
+      const auto [a, b] = po_edges_[from.edges + e];
+      if (a == position) {
+        // What came after the task comes after every one of its steps
+        for (uint32_t k = 0; k < steps; ++k) {
+          po_edges_.emplace_back(first + k, moved(b));
+        }
+      } else if (b != position) {  // the item had nothing before it
+        po_edges_.emplace_back(moved(a), moved(b));
+      }
+    }
+    if (method != nullptr) {
+      const hddl::Network & net = method->method == kNone ? m_.initial :
+        m_.methods[method->method].network;
+      for (auto [a, b] : net.order) {
+        po_edges_.emplace_back(first + a, first + b);
+      }
+    }
+    to.item_count = static_cast<uint32_t>(po_items_.size()) - to.items;
+    to.edge_count = static_cast<uint32_t>(po_edges_.size()) - to.edges;
+  }
+
+  Outcome partial_order(Result & result)
+  {
+    relaxed_ = free_.get();
+    if (po_nodes_.empty()) {
+      state_.assign(g_.atoms.size(), false);
+      state_hash_ = 0;
+      for (ground::AtomId a : g_.init_atoms) {
+        state_[a] = true;
+        state_hash_ ^= zobrist_[a];
+      }
+      po_states_.clear();
+      po_hashes_.clear();
+      po_store();
+      // One node per way of instantiating the initial network
+      PoNode empty;
+      for (uint32_t m : initial_) {
+        PoNode node;
+        node.root = true;
+        node.method = m;
+        // An item to replace: the task above all
+        empty.items = static_cast<uint32_t>(po_items_.size());
+        empty.item_count = 1;
+        empty.edges = static_cast<uint32_t>(po_edges_.size());
+        empty.edge_count = 0;
+        po_items_.push_back(PoItem{0, kNone});
+        po_replace(empty, 0, &p_.methods[m], node);
+        po_push(node, 0);
+      }
+    }
+    while (!po_open_.empty()) {
+      if ((budget_ != nullptr && budget_->exhausted()) || work_ >= limit_) {
+        return Outcome::OutOfBudget;
+      }
+      if ((po_states_.size() + po_items_.size() + po_edges_.size()) * sizeof(uint64_t) >
+        (size_t{3} << 30))
+      {
+        po_over_ = true;
+        return Outcome::OutOfBudget;
+      }
+      std::pop_heap(po_open_.begin(), po_open_.end(), std::greater<>());
+      const uint32_t n = po_open_.back().second;
+      po_open_.pop_back();
+      ++expansions_;
+      ++work_;
+      const PoNode node = po_nodes_[n];
+      po_load(node.state);
+      if (node.item_count == 0) {
+        if (holds(g_.goal)) {
+          result.plan = po_plan(n);
+          return Outcome::Solved;
+        }
+        continue;
+      }
+      if (!po_seen_.insert(po_key(node)).second) {
+        continue;
+      }
+      relaxed_->evaluate(state_);
+      work_ += relaxed_->operators() / 32 + 1;
+      uint64_t base = goal_cost();
+      bool possible = base != kInfinite;
+      for (uint32_t i = 0; i < node.item_count && possible; ++i) {
+        const uint32_t c = relaxed_->task(po_items_[node.items + i].task);
+        possible = c != Relaxed::kUnreached;
+        base += c;
+      }
+      if (!possible) {
+        continue;
+      }
+      // The items with nothing before them
+      std::vector<bool> waits(node.item_count, false);
+      for (uint32_t e = 0; e < node.edge_count; ++e) {
+        waits[po_edges_[node.edges + e].second] = true;
+      }
+      for (uint32_t i = 0; i < node.item_count; ++i) {
+        if (waits[i]) {
+          continue;
+        }
+        const PoItem item = po_items_[node.items + i];
+        const tdg::Task & task = p_.tasks[item.task];
+        const uint64_t without = base - relaxed_->task(item.task);
+        if (!task.actions.empty()) {
+          const ground::Action * action = nullptr;
+          for (uint32_t a : task.actions) {
+            if (holds(g_.actions[a].precondition)) {
+              action = &g_.actions[a];
+              break;
+            }
+          }
+          if (action == nullptr) {
+            continue;
+          }
+          PoNode child;
+          child.parent = n;
+          child.did = item.id;
+          child.did_task = item.task;
+          po_replace(node, i, nullptr, child);
+          const size_t mark = trail_.size();
+          const uint64_t hash = state_hash_;
+          apply(*action);
+          child.state = static_cast<uint32_t>(po_hashes_.size());
+          po_store();
+          while (trail_.size() > mark) {
+            const ground::AtomId a = trail_.back();
+            trail_.pop_back();
+            state_[a] = !state_[a];
+          }
+          state_hash_ = hash;
+          po_push(child, without);
+          continue;
+        }
+        for (uint32_t m : methods_[item.task]) {
+          const tdg::Method & method = p_.methods[m];
+          if (method.has_precondition && std::none_of(method.precondition.begin(),
+            method.precondition.end(),
+            [&](uint32_t a) {return holds(g_.actions[a].precondition);}))
+          {
+            continue;
+          }
+          const uint32_t cost = relaxed_->method(m);
+          if (cost == Relaxed::kUnreached) {
+            continue;
+          }
+          PoNode child;
+          child.parent = n;
+          child.state = node.state;
+          child.did = item.id;
+          child.did_task = item.task;
+          child.method = m;
+          po_replace(node, i, &method, child);
+          po_push(child, without + cost);
+        }
+      }
+    }
+    return Outcome::Unsolvable;
+  }
+
+  void po_store()
+  {
+    const size_t words = (state_.size() + 63) / 64;
+    const size_t at = po_states_.size();
+    po_states_.resize(at + words, 0);
+    for (size_t a = 0; a < state_.size(); ++a) {
+      if (state_[a]) {
+        po_states_[at + a / 64] |= uint64_t{1} << (a % 64);
+      }
+    }
+    po_hashes_.push_back(state_hash_);
+  }
+
+  void po_load(uint32_t index)
+  {
+    const size_t words = (state_.size() + 63) / 64;
+    const size_t at = size_t{index} * words;
+    for (size_t a = 0; a < state_.size(); ++a) {
+      state_[a] = (po_states_[at + a / 64] >> (a % 64)) & 1u;
+    }
+    state_hash_ = po_hashes_[index];
+  }
+
+  std::string po_plan(uint32_t goal) const
+  {
+    std::vector<uint32_t> path;
+    for (uint32_t n = goal; n != kNone; n = po_nodes_[n].parent) {
+      path.push_back(n);
+    }
+    std::reverse(path.begin(), path.end());
+    auto text = [&](uint32_t id) {return std::to_string(id + 1);};
+    // The task of each occurrence, and the only subtask of those added by splitting
+    std::unordered_map<uint32_t, uint32_t> task_of;
+    std::unordered_map<uint32_t, uint32_t> only_child;
+    for (uint32_t n : path) {
+      const PoNode & node = po_nodes_[n];
+      if (node.method == kNone) {
+        continue;
+      }
+      const tdg::Method & method = p_.methods[node.method];
+      for (uint32_t k = 0; k < node.child_count; ++k) {
+        task_of[node.first_child + k] = method.subtasks[k];
+      }
+      if (!node.root && m_.tasks[p_.tasks[node.did_task].task].artificial) {
+        only_child[node.did] = node.first_child;
+      }
+    }
+    auto real = [&](uint32_t id) {
+        while (m_.tasks[p_.tasks[task_of.at(id)].task].artificial) {
+          id = only_child.at(id);
+        }
+        return id;
+      };
+    std::string actions = "==>\n";
+    std::string roots = "root";
+    std::string tree;
+    size_t steps = 0;
+    for (uint32_t n : path) {
+      const PoNode & node = po_nodes_[n];
+      if (node.method == kNone) {
+        actions += text(node.did) + " " + name(node.did_task) + "\n";
+        ++steps;
+        continue;
+      }
+      const tdg::Method & method = p_.methods[node.method];
+      // The subtasks in an order the method allows, as the format asks
+      const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
+        order_[method.method];
+      std::string children;
+      for (uint32_t step : order) {
+        children += " " + text(real(node.first_child + step));
+      }
+      if (node.root) {
+        roots += children;
+      } else if (!m_.tasks[p_.tasks[node.did_task].task].artificial) {
+        tree += text(node.did) + " " + name(node.did_task) + " -> " +
+          m_.methods[method.method].name + children + "\n";
+      }
+    }
+    bf_steps_ = steps;
+    return actions + roots + "\n" + tree + "<==\n";
+  }
+
   // The methods of a task that can be applied now, most promising first: by their cost in the
   // relaxed problem from the current state, leaving out those impossible even there
   std::vector<uint32_t> candidates(uint32_t task)
@@ -1819,6 +2175,11 @@ private:
   std::vector<uint32_t> touched_;
   uint64_t pruned_ = 0;
   bool linearized_ = false;  // the problem is partially ordered: one order of each network
+
+public:
+  bool proved_ = false;      // Unsolvable came from the search that tries every interleaving
+
+private:
   std::unique_ptr<Relaxed> free_;     // any action anywhere: what it calls impossible, is
   std::unique_ptr<Relaxed> ordered_;  // effects only in the order of the methods: sharper
   Relaxed * relaxed_ = nullptr;       // the one in use; null: methods in their fixed order
@@ -1839,6 +2200,17 @@ private:
     bool over = false;  // out of room
     uint64_t pops = 0;
   };
+  std::vector<PoNode> po_nodes_;
+  std::vector<PoItem> po_items_;
+  std::vector<std::pair<uint32_t, uint32_t>> po_edges_;
+  std::vector<uint64_t> po_states_;
+  std::vector<uint64_t> po_hashes_;
+  std::vector<std::pair<uint64_t, uint32_t>> po_open_;
+  std::unordered_set<uint64_t> po_seen_;
+  uint32_t po_ids_ = 0;
+  bool po_over_ = false;
+  bool po_exhausted_ = false;  // its whole space was searched: no plan at all
+  bool dfs_over_[2] = {false, false};  // guided, fixed order: nothing in the order tried
   Bf bfs_[2];           // guided by the free relaxation and by the ordered one
   Bf * bf_ = &bfs_[0];  // the one taking its turn
   // Among equal costs the oldest first: the alternatives of a decomposition often tie, and
@@ -1862,8 +2234,9 @@ Result total_order(const tdg::Problem & problem, kairos::Budget * budget)
     result.outcome = Outcome::Unsolvable;  // whatever the order: nothing can be decomposed
     return result;
   }
-  Result result = Search(problem, budget).run();
-  if (result.outcome == Outcome::Unsolvable && !problem.model.total_order) {
+  Search search(problem, budget);
+  Result result = search.run();
+  if (result.outcome == Outcome::Unsolvable && !problem.model.total_order && !search.proved_) {
     result.outcome = Outcome::Unsupported;
     result.message = "no plan with the subtasks of each task network in the order tried; "
       "interleaving them is not searched yet";

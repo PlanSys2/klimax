@@ -161,7 +161,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 | H1 | ✅ | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
 | H2 | ✅ | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
 | H3 | ✅ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
-| H3b | 🔄 | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
+| H3b | ✅ | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
 | H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
 | H5 | ⏳ | Numérico | Más de 91/140 en el banco de Quenard |
 | H6 | ⏳ | Temporal: HDDL 2.1 completo, banco de referencia propio (3.1); Aries, vía unified-planning, como rival | Resuelve el banco; planes validados; comparación con Aries en los problemas que ambos expresan |
@@ -336,7 +336,7 @@ Detalle de H3b:
 - ✅ Módulo Python `klimax` (nanobind, como el de Kairos; `python/` en el repositorio):
   `solve`, `check`, `verify`. Sin dependencias en ejecución. Con `pyproject.toml` para la rueda
   (`klimax-planner`), aún sin publicar.
-- ✅ `up-klimax` (`planner_ws/up-klimax`, repositorio local; falta crearlo en GitHub):
+- ✅ `up-klimax` (`planner_ws/up-klimax`, github.com/PlanSys2/up-klimax):
   - `klimax`, planificador de una llamada para problemas jerárquicos; devuelve un
     `HierarchicalPlan` de UPF y demuestra cuándo no hay plan (`UNSOLVABLE_PROVEN`).
   - `klimax-val`, validador de planes jerárquicos (comprueba la descomposición).
@@ -349,30 +349,41 @@ Detalle de H3b:
     universales, igualdades, efectos condicionales y universales, tipos jerárquicos, fluentes
     de objeto. 13 pruebas, incluido el ejemplo jerárquico de UPF y sus planes de referencia.
 - ✅ El banco del IPC 2023 por la vía UPF (`bench/htn/upf_route.py`: el lector de UPF lee el
-  HDDL, `up-klimax` planifica y valida): con un problema por dominio, 24 de 32 dominios llegan
-  al plan validado. Los 8 restantes se paran en el lector de UPF (nombres repetidos entre
-  tipos y objetos en Barman, Freecell y Woodworking; sintaxis que no lee en Snake y Colouring;
-  un tipo declarado dos veces en UM-Translog), no en Klimax. Son candidatos a aportar a UPF.
+  HDDL, `up-klimax` planifica y valida), con un problema por dominio: 27 de 32 dominios llegan
+  al plan validado (permitiendo nombres compartidos entre tipos y objetos, que UPF admite con
+  `error_used_name = False`). Los otros 5 se paran en el lector de UPF, no en Klimax:
+  - Snake, Colouring y Ultralight-Cockpit: secciones en un orden que la gramática no admite.
+    Comunicado (aiplan4eu/unified-planning#909) y arreglado en un PR nuestro (#910, pendiente
+    de revisión): con él son 30 de 32.
+  - UM-Translog (tipos con varios padres) y Woodworking de orden parcial (un objeto declarado
+    en `:constants` y otra vez en `:objects`): rarezas de los ficheros, sin comunicar.
 - ✅ La reescritura de fluentes de objeto, ofrecida como compilador de UPF
   (`klimax-htn-usertype-fluents-remover`): UPF no tenía ninguno para problemas jerárquicos y lo
   elige solo cuando se le pide esa compilación para uno. Con `plan_back` para devolver un plan
   jerárquico entero al problema original (UPF solo prevé devolver las acciones).
-- 🔄 Primera comparación con Aries (`up-aries` 0.5.0) por la vía UPF, en los 14 problemas de las
+- ✅ Comparación con Aries (`up-aries` 0.5.0) por la vía UPF, en los 14 problemas de las
   pruebas de `up-klimax`, validando los planes de cada uno con el validador del otro:
   - `aries-val` acepta todos los planes de Klimax.
   - En 9 problemas los dos resuelven y `klimax-val` acepta el plan de Aries.
   - En `delivery` (orden total y parcial) Aries devuelve un plan que no es ejecutable: mueve
     el robot entre dos habitaciones sin enlace. `klimax-val` lo rechaza, y también el
-    validador secuencial del propio UPF. Pendiente de aislar y, si se confirma, de comunicar.
+    validador secuencial del propio UPF. Aislado: Aries no aplica la precondición de una
+    acción sobre un fluente estático cuando la acción es subtarea de un método; su propio
+    validador da el plan por inválido. Comunicado (plaans/aries#284).
   - Aries no resuelve los tres problemas con cuantificadores (error interno) ni demuestra el
     problema sin solución (agota el tiempo; Klimax lo demuestra en 30 ms).
 - ⏳ Aprovechar el resto de UPF:
-  - Comparación con Aries (`up-aries`) por la misma vía, en los problemas que ambos expresan.
+  - Aries sobre el banco del IPC ya está en la línea base (60 de 761 y 106 de 283 a 30 s, con
+    su ejecutable); repetirlo por la vía UPF no añade nada hasta H6, donde es el rival.
   - El banco de pruebas de UPF (`up-test-cases`) y su informe de motores.
   - Modo anytime, replanificación y reparación de planes: con H4 (anytime y óptimo).
   - Con H5 y H6, declarar números y tiempo (`TASK_ORDER_TEMPORAL`, acciones durativas).
-- ⏳ Publicar: repositorio `PlanSys2/up-klimax`, ruedas de `klimax-planner` y alta en la lista
-  de motores de UPF. Con la primera versión pública de Klimax.
+- ✅ Repositorio `PlanSys2/up-klimax` (privado, como Klimax).
+- ⏳ Publicar las ruedas de `klimax-planner` y pedir el alta en la lista de motores de UPF: con
+  la primera versión pública de Klimax.
+- ✅ Criterio de salida: Klimax resuelve desde unified-planning los problemas jerárquicos que
+  su modelo expresa (el ejemplo de UPF, los de las pruebas y 27 dominios del IPC), con los
+  planes verificados.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

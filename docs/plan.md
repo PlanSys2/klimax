@@ -378,7 +378,7 @@ Detalle de H3b:
   - El banco de pruebas de UPF (`up-test-cases`) y su informe de motores.
   - Modo anytime, replanificación y reparación de planes: con H4 (anytime y óptimo).
   - Con H5 y H6, declarar números y tiempo (`TASK_ORDER_TEMPORAL`, acciones durativas).
-- ✅ Repositorio `PlanSys2/up-klimax` (privado, como Klimax).
+- ✅ Repositorio `PlanSys2/up-klimax`. Público, como Klimax, desde el 24-11-2026.
 - ⏳ Publicar las ruedas de `klimax-planner` y pedir el alta en la lista de motores de UPF: con
   la primera versión pública de Klimax.
 - ✅ Criterio de salida: Klimax resuelve desde unified-planning los problemas jerárquicos que
@@ -462,7 +462,7 @@ se adelante (H3b) y que el rival en la parte temporal sea Aries, no PANDA.
 1. **Nombre: Klimax** (κλῖμαξ, «escalera»; por la jerarquía de tareas). Libre en PyPI (`klimax`,
    `klimax-planner`), en `PlanSys2/klimax` y en rosdistro; en GitHub solo hay proyectos menores
    ajenos con ese nombre.
-2. **Repositorio:** `PlanSys2/klimax`, Apache-2.0, privado hasta la primera versión.
+2. **Repositorio:** `PlanSys2/klimax`, Apache-2.0, público desde el 24-11-2026 (antes de la primera versión, por decisión propia).
 3. **Kairos como librería:** Kairos exporta un destino CMake `kairos::core` con sus cabeceras
    internas, sin promesa de estabilidad. No se copia código.
 4. **IPC 2027:** uno de los objetivos, no el único. El calendario del proyecto no depende de él.

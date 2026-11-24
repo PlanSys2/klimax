@@ -27,6 +27,7 @@ planned yet.
 
 ```
 klimax DOMAIN PROBLEM [--timeout S]    # the plan and its decomposition, in the IPC format
+klimax DOMAIN PROBLEM --timeout S --anytime   # go on to shorter plans; says if none is shorter
 klimax --check DOMAIN PROBLEM          # read HDDL 1.0 and report every error
 klimax --verify DOMAIN PROBLEM PLAN    # check a plan in the format of the IPC HTN tracks
 ```

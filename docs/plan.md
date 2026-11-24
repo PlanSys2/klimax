@@ -239,46 +239,61 @@ Detalle de H2:
   | Klimax, con el objetivo en la estimación | 219 | 369 | 475 |
   | Klimax, desempate por antigüedad | 232 | 398 | 493 |
   | Klimax, con relajación ordenada por turnos | 247 | 421 | 509 |
-  | **Klimax, con la comprobación del objetivo sobre la pila** | **251** | **426** | **522** |
+  | Klimax, con la comprobación del objetivo sobre la pila | 251 | 426 | 522 |
+  | **Klimax, con planes relajados y repetidos por relevancia** | **255** | **437** | **554** |
   | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
   | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
   | HyperTensioN | 52 | 298 | 332 |
 
-  Donde más falta: Multiarm-Blocksworld, Logistics, Blocksworld-HPDDL y Woodworking, en los que
-  la búsqueda en profundidad se compromete con una rama y no la suelta. Apunta a una búsqueda
-  primero-el-mejor con la misma heurística.
-- ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
-- ✅ Búsqueda primero-el-mejor con la heurística, como tercer modo de los turnos: a 1 s gana a
-  PandaDealer en 12 dominios, empata en 1 y pierde en 10.
+  La última fila sale de dos ejecuciones (una a 1 s y otra a 30 s): la de 30 s se hizo con la
+  máquina al doble de lenta de lo habitual y sus columnas cortas quedan en 220 y 383. Hay que
+  repetirla con la máquina libre.
+- ✅ Búsqueda primero-el-mejor con la heurística, como tercer modo de los turnos.
 - ✅ El estado objetivo del problema entra en la estimación (antes solo se comprobaba al final):
-  Multiarm-Blocksworld pasa de 9 a 49 resueltos a 1 s y Blocksworld-GTOHP de 15 a 25. Con esto
-  Klimax supera a 1 s a todos los planificadores de la línea base (367 frente a 318).
-- ✅ Primero-el-mejor con desempate por antigüedad y evaluación diferida (medido en una muestra
-  de 192 problemas frente a otras tres variantes): AssemblyHierarchical pasa de 12 a 28 a 1 s.
+  Multiarm-Blocksworld pasa de 9 a 49 resueltos a 1 s y Blocksworld-GTOHP de 15 a 25.
+- ✅ Primero-el-mejor con desempate por antigüedad y evaluación diferida: AssemblyHierarchical
+  pasa de 12 a 28 a 1 s.
 - ✅ En primero-el-mejor, lo que no tiene alternativa se hace en el mismo nodo (acciones y
   descomposiciones con un único método aplicable): las cadenas de trámite no cuestan nodos.
 - ✅ Relajación ordenada: los efectos de una acción solo cuentan como paso de un método, tras los
-  pasos anteriores. Corrige la ceguera de la relajación libre en Logistics (acciones de bloqueo
-  sin precondición daban cualquier tarea por hecha con coste 2). No sirve de prueba de
-  imposibilidad, así que solo ordena. Dos búsquedas primero-el-mejor, una con cada relajación,
-  se turnan con las dos en profundidad.
+  pasos anteriores. No sirve de prueba de imposibilidad, así que solo ordena. Dos búsquedas
+  primero-el-mejor, una con cada relajación, se turnan con las dos en profundidad.
 - ✅ Lo que falta del objetivo debe poder producirlo alguna tarea que quede en la pila: corta
-  pronto las elecciones equivocadas de parámetros libres (Woodworking, Blocksworld-GTOHP).
-- ⏳ Dominios donde PandaDealer sigue por delante a 30 s: Logistics (48 frente a 74), Woodworking
-  (9 frente a 20), Blocksworld-GTOHP (19 frente a 27; con una sola relajación eran 27), Robot
-  (14 frente a 20) y Hiking (17 frente a 22).
-- ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
-- ✅ Búsqueda primero-el-mejor con la heurística, como tercer modo de los turnos: a 1 s gana a
-  PandaDealer en 12 dominios, empata en 1 y pierde en 10.
-- ✅ El estado objetivo del problema entra en la estimación (antes solo se comprobaba al final):
-  Multiarm-Blocksworld pasa de 9 a 49 resueltos a 1 s y Blocksworld-GTOHP de 15 a 25. Con esto
-  Klimax supera a 1 s a todos los planificadores de la línea base (367 frente a 318).
-- ✅ Primero-el-mejor con desempate por antigüedad y evaluación diferida (medido en una muestra
-  de 192 problemas frente a otras tres variantes): AssemblyHierarchical pasa de 12 a 28 a 1 s.
-- ⏳ Logistics (30 de 80 a 30 s; PandaDealer, 74): las alternativas de «pasar por un sitio
-  intermedio» empatan en la estimación, que valora cada subtarea desde el mismo estado.
+  pronto las elecciones equivocadas de parámetros libres.
+- ✅ Estimación por plan relajado (al estilo FF) en la búsqueda con relajación ordenada: cuenta
+  una sola vez las acciones que comparten varias subtareas, donde la suma de costes hacía
+  parecer más barato lo que alejaba del objetivo. Logistics pasa de 50 a 74 a 30 s (PandaDealer,
+  74) y Robot de 14 a 18–20 (según la ejecución; el mejor, 20). Medido a 1 s: 440 con planes
+  solo en la ordenada, 429 en las dos, 423 solo en la libre, 421 con sumas en las dos.
+- ✅ Estados repetidos por relevancia: dos estados que solo difieren en átomos que ninguna tarea
+  pendiente puede leer, y que el objetivo no menciona, cuentan como uno. Woodworking pasa de 13
+  a 15–16 a 30 s.
+- ✅ Towers 19 y 20 no tienen solución: a los dos ficheros del IPC les faltan tres hechos
+  `smallerThan` (hay otros tres repetidos). Klimax lo demuestra y resuelve los 18 restantes
+  (17 con la máquina cargada); ningún otro planificador pasa de 11.
+- ❌ Probado y retirado: salto atrás dirigido por conflictos en la búsqueda en profundidad (con
+  la causa del fallo guardada junto a cada estado visto). Ni a 1 s ni a 30 s cambia la
+  cobertura: en Woodworking las causas de fallo son conjuntos grandes y casi toda decisión
+  anterior puede influir en ellas.
+- ❌ Probado sin efecto: contar las aplicaciones de método en el coste relajado, valorar toda la
+  pila en vez de sus 64 primeras tareas, y empezar la búsqueda en orden fijo por la cota
+  relajada.
+- ⏳ Dominios donde algún planificador sigue por delante a 30 s (11 de 23; por delante en 7,
+  igual en 5):
+  - Woodworking (15 frente a 30 de Lilotane y PDDL4J; PandaDealer, 20): el reparto de tableros
+    es un problema de mochila que la relajación no ve. Lo resuelven los planificadores por SAT.
+  - Monroe parcialmente observable (8 frente a 19 de Lilotane; el resto, 7–8).
+  - Hiking (17 frente a 25 de HyperTensioN) y Rover (22 frente a 27 de HyperTensioN): métodos
+    con muchos parámetros libres, donde gana quien no instancia.
+  - Blocksworld-GTOHP (22 frente a 29 de PANDA): la elección entre dejar un bloque donde está
+    o bajarlo a la mesa solo se revela equivocada cientos de acciones después.
+  - Por uno o dos problemas: Robot, Factories, Lamps, Blocksworld-HPDDL, SharpSAT, Snake.
+- ⏳ Motor lifted para los 44 problemas que no se pueden instanciar (Snake 25, SharpSAT 7,
+  Minecraft-Player 7, Hiking 5). Es una pieza grande (Snake con 3 huecos ya da 1,9 millones de
+  métodos instanciados) y lo que puede ganar es poco frente a la línea base, que tampoco los
+  resuelve salvo Hiking: pasa a H4, junto con Hiking y Rover.
 - ✅ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761). Klimax:
-  421 y 509. Por dominios a 30 s gana en 10, empata en 3 y pierde en 10.
+  437 y 554.
 
 Detalle de H3 (empezada antes de cerrar del todo H2, porque el motor de orden total la daba
 casi hecha):
@@ -297,7 +312,7 @@ casi hecha):
 
   | | 100 ms | 1 s | 30 s |
   |---|---|---|---|
-  | **Klimax** | **150** | **199** | **230** |
+  | **Klimax** | **148** | **193** | **234** |
   | Linear-Simple | 128 | 161 | 207 |
   | Linear-Complex | 123 | 162 | 204 |
   | PANDA ppro | 101 | 118 | 156 |

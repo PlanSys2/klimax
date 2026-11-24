@@ -156,8 +156,8 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 
 | Fase | Estado | Contenido | Criterio de salida |
 |---|---|---|---|
-| H0 | 🔄 | Semántica de HDDL 2.1 por escrito; decisión sobre `kairos::core`; infraestructura de medida con PANDA, Lilotane, HyperTensioN, Aries, SIADEX y PDDL4J instalados | Línea base reproducida frente a los resultados del IPC 2023 |
-| H1 | ⏳ | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
+| H0 | ✅ | Semántica de HDDL 2.1 por escrito; decisión sobre `kairos::core`; infraestructura de medida con PANDA, Lilotane, HyperTensioN, Aries, SIADEX y PDDL4J instalados | Línea base reproducida frente a los resultados del IPC 2023 |
+| H1 | 🔄 | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
 | H2 | ⏳ | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
 | H3 | ⏳ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
 | H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
@@ -166,20 +166,36 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 | H7 | ⏳ | Robustez, fuzzing, banco por característica, Python, UPF, PlanSys2, versión 1.0.0 | Como Kairos |
 | H8 | ⏳ | IPC 2027 y artículo | Según el calendario del IPC |
 
+H0 está cerrada: la línea base reproduce el orden del IPC 2023 (`docs/baseline.md`). Objetivo a
+batir a 30 s: 494 de 761 en orden total (PandaDealer) y 207 de 283 en orden parcial
+(Linear-Simple).
+
 Detalle de H0:
 
 - ✅ Semántica de HDDL 1.0 y HDDL 2.1 por escrito (`docs/semantics.md`), con las decisiones marcadas.
 - ✅ `kairos::core` en Kairos (PR #8, fusionado).
 - ✅ Repositorio de Klimax con el esqueleto compilando sobre `kairos::core` y sus pruebas.
-- ✅ Quince configuraciones de competidores instaladas y verificadas: PANDA (cinco), PandaDealer (dos),
-  Linear-Simple, Linear-Complex, TOAD, SIADEX, PDDL4J, Lilotane, HyperTensioN y Aries.
+- ✅ Quince configuraciones de competidores instaladas y verificadas: PANDA (cinco), PandaDealer
+  (dos), Linear-Simple, Linear-Complex, TOAD, SIADEX, PDDL4J, Lilotane, HyperTensioN y Aries.
 - ✅ Arnés de medida: un núcleo y 8 GB por ejecución, todos los planes verificados.
-- ✅ Línea base a 100 ms y 1 s en el banco del IPC 2023.
-- ✅ Línea base a 30 s.
+- ✅ Línea base a 100 ms, 1 s y 30 s en el banco del IPC 2023.
 - ✅ Comparación con los resultados publicados del IPC 2023 (el orden coincide).
 - ✅ Resultados de la línea base en la documentación de Klimax (`docs/baseline.md`).
+
+Pasan a la fase que los necesita:
+
+- ⏳ Configuraciones óptimas y satisficing con mejora de plan de los competidores (H4).
+- ⏳ Banco numérico de Quenard y SibylSmt (H5).
 - ⏳ Discutir con los autores de HDDL 2.1 las decisiones de semántica (antes de H6).
-- ⏳ Competidores sin medir: configuraciones óptimas, PDDL4J OptiPlan, banco numérico de Quenard.
+
+Detalle de H1:
+
+- ⏳ Parser de HDDL 1.0 con errores con fichero, línea y columna.
+- ⏳ Modelo: tareas, métodos, redes de tareas, restricciones de variables.
+- ⏳ Lee los 1044 problemas del banco del IPC 2023 (y el de 2020).
+- ⏳ Grounding con grafo de descomposición de tareas.
+- ⏳ Verificador de planes, contrastado con el del IPC sobre los planes de la línea base.
+- ⏳ `klimax --check` y `klimax --verify` en el ejecutable.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

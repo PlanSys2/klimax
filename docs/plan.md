@@ -236,7 +236,8 @@ Detalle de H2:
   | Klimax, orden fijo | 198 | 264 | 330 |
   | Klimax, con heurística por turnos | 195 | 300 | 372 |
   | Klimax, con primero-el-mejor en los turnos | 201 | 310 | por medir |
-  | Klimax, con el objetivo en la estimación | 219 | 367 | por medir |
+  | Klimax, con el objetivo en la estimación | 219 | 369 | 475 |
+  | Klimax, desempate por antigüedad | 232 | 395 | por medir |
   | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
   | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
   | HyperTensioN | 52 | 298 | 332 |
@@ -250,7 +251,10 @@ Detalle de H2:
 - ✅ El estado objetivo del problema entra en la estimación (antes solo se comprobaba al final):
   Multiarm-Blocksworld pasa de 9 a 49 resueltos a 1 s y Blocksworld-GTOHP de 15 a 25. Con esto
   Klimax supera a 1 s a todos los planificadores de la línea base (367 frente a 318).
-- ⏳ Mejorar la guía en Logistics, que no tiene estado objetivo.
+- ✅ Primero-el-mejor con desempate por antigüedad y evaluación diferida (medido en una muestra
+  de 192 problemas frente a otras tres variantes): AssemblyHierarchical pasa de 12 a 28 a 1 s.
+- ⏳ Logistics (30 de 80 a 30 s; PandaDealer, 74): las alternativas de «pasar por un sitio
+  intermedio» empatan en la estimación, que valora cada subtarea desde el mismo estado.
 - ⏳ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761).
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.

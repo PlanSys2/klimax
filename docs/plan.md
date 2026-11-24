@@ -219,12 +219,14 @@ Detalle de H2:
   métodos en el orden escrito y detección de estado y pila repetidos. `klimax DOMINIO PROBLEMA`
   escribe el plan y su descomposición en el formato del IPC, sin las tareas que añade la
   separación de parámetros.
-- 🔄 Medida en el banco de orden total. Una muestra de 166 de los 761 problemas a 1 s: 77
-  resueltos y verificados, 87 sin terminar y 2 planes rechazados por el verificador (Logistics,
-  por examinar). No es todavía comparable con la línea base: falta la pasada completa.
-- ⏳ Planes demasiado largos: sin guía, la búsqueda da rodeos (hasta 30 000 acciones, ficheros de
-  20 MB que el verificador del IPC tarda minutos en comprobar). Hace falta cortar la recursión
-  que no avanza y preferir los métodos que terminan.
+- ✅ Cota inferior de acciones por tarea, calculada sobre el grafo de descomposición: ordena los
+  métodos (primero los más cortos) y acota la longitud del plan, con un tope que se dobla en
+  cada vuelta. Los planes dejan de dar rodeos: frente a PandaDealer, la mediana de longitud en
+  los 191 problemas que ambos resuelven es 1,00 (percentil 90: 1,49).
+- 🔄 Medida en el banco de orden total (761 problemas, planes verificados con el verificador del
+  IPC): 187 resueltos a 100 ms y 256 a 1 s. La línea base: a 100 ms el mejor es PandaDealer
+  lama con 162; a 1 s, PandaDealer con 318, Linear-Complex con 303 y HyperTensioN con 298.
+  Falta la medida a 30 s.
 - ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
 - ⏳ Heurística y búsqueda informada (enlaza con H4).
 - ⏳ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761).

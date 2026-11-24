@@ -15,9 +15,11 @@
 #include "search/total_order.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <random>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,6 +39,7 @@ struct Cell
   uint32_t node = 0;   // its node in the decomposition tree
   uint32_t next = kNone;
   uint64_t hash = 0;   // of the whole list from here
+  uint64_t rest = 0;   // fewest actions the whole list from here can take
 };
 
 struct Node
@@ -88,32 +91,67 @@ public:
       return result;
     }
     orders();
-    state_.assign(g_.atoms.size(), false);
+    costs();
     std::mt19937_64 random(20261124);
     for (size_t a = 0; a < g_.atoms.size(); ++a) {
       zobrist_.push_back(random());
     }
+    // Plans of at most `bound` actions first, then twice as long, and so on: a search without
+    // a bound finds plans with long detours. A branch is cut when the actions done plus the
+    // fewest the pending tasks can take exceed the bound.
+    uint64_t least = kInfinite;
+    for (uint32_t m : p_.initial) {
+      least = std::min(least, method_cost_[m]);
+    }
+    for (uint64_t bound = std::max<uint64_t>(least, 1); ; bound *= 2) {
+      const Outcome outcome = iteration(bound, result);
+      result.expansions = expansions_;
+      if (std::getenv("KLIMAX_TRACE_SEARCH") != nullptr) {
+        std::fprintf(stderr, "bound %llu: %s, %llu expansions so far%s\n",
+          static_cast<unsigned long long>(bound),
+          outcome == Outcome::Solved ? "solved" : outcome == Outcome::Unsolvable ? "nothing" :
+          "stopped", static_cast<unsigned long long>(expansions_), cut_ ? ", cut" : "");
+      }
+      if (outcome != Outcome::Unsolvable || !cut_) {
+        result.outcome = outcome;  // without cuts, the whole space was searched
+        return result;
+      }
+    }
+  }
+
+private:
+  static constexpr uint64_t kInfinite = ~uint64_t{0} / 4;
+
+  Outcome iteration(uint64_t bound, Result & result)
+  {
+    bound_ = bound;
+    cut_ = false;
+    state_.assign(g_.atoms.size(), false);
+    state_hash_ = 0;
     for (ground::AtomId a : g_.init_atoms) {
       state_[a] = true;
       state_hash_ ^= zobrist_[a];
     }
+    trail_.clear();
+    cells_.clear();
+    executed_.clear();
+    choices_.clear();
+    choice_task_.clear();
+    seen_.clear();
+    top_ = kNone;
     // The ways of instantiating the initial network are the methods of a task above all
-    nodes_.push_back(Node{kNone, kNone, kNone});
+    nodes_.assign(1, Node{kNone, kNone, kNone});
     bool found = descend(kNone, 0, kNone, 0);
     while (found || backtrack()) {
       found = false;
       if (budget_ != nullptr && budget_->exhausted()) {
-        result.outcome = Outcome::OutOfBudget;
-        result.expansions = expansions_;
-        return result;
+        return Outcome::OutOfBudget;
       }
       if (top_ == kNone) {
         if (holds(g_.goal)) {
-          result.outcome = Outcome::Solved;
           result.plan = plan();
           result.steps = executed_.size();
-          result.expansions = expansions_;
-          return result;
+          return Outcome::Solved;
         }
         continue;  // every task done but the goal does not hold
       }
@@ -140,12 +178,49 @@ public:
       }
       found = descend(cell.task, cell.node, cell.next, 0);
     }
-    result.outcome = Outcome::Unsolvable;
-    result.expansions = expansions_;
-    return result;
+    return Outcome::Unsolvable;
   }
 
-private:
+  // The fewest actions each task and method can be decomposed into, whatever the state; and
+  // the methods of each task from the one that needs fewest
+  void costs()
+  {
+    task_cost_.assign(p_.tasks.size(), kInfinite);
+    method_cost_.assign(p_.methods.size(), kInfinite);
+    for (size_t t = 0; t < p_.tasks.size(); ++t) {
+      if (!p_.tasks[t].actions.empty()) {
+        task_cost_[t] = 1;
+      }
+    }
+    for (bool changed = true; changed; ) {
+      changed = false;
+      for (size_t m = 0; m < p_.methods.size(); ++m) {
+        uint64_t sum = 0;
+        for (uint32_t t : p_.methods[m].subtasks) {
+          sum = std::min(kInfinite, sum + task_cost_[t]);
+        }
+        if (sum < method_cost_[m]) {
+          method_cost_[m] = sum;
+          const uint32_t parent = p_.methods[m].task;
+          if (parent != kNone && sum < task_cost_[parent]) {
+            task_cost_[parent] = sum;
+            changed = true;
+          }
+        }
+      }
+    }
+    auto sorted = [&](std::vector<uint32_t> methods) {
+        std::stable_sort(methods.begin(), methods.end(), [&](uint32_t a, uint32_t b) {
+            return method_cost_[a] < method_cost_[b];
+          });
+        return methods;
+      };
+    for (const tdg::Task & t : p_.tasks) {
+      methods_.push_back(sorted(t.methods));
+    }
+    initial_ = sorted(p_.initial);
+  }
+
   // The steps of each network in the order to execute them
   void orders()
   {
@@ -236,7 +311,7 @@ private:
   // was not seen before. `task` is kNone for the initial network.
   bool descend(uint32_t task, uint32_t node, uint32_t below, uint32_t from)
   {
-    const std::vector<uint32_t> & methods = task == kNone ? p_.initial : p_.tasks[task].methods;
+    const std::vector<uint32_t> & methods = task == kNone ? initial_ : methods_[task];
     for (uint32_t i = from; i < methods.size(); ++i) {
       const tdg::Method & method = p_.methods[methods[i]];
       if (method.has_precondition && std::none_of(method.precondition.begin(),
@@ -267,11 +342,25 @@ private:
         cell.next = top;
         cell.hash = mix((top == kNone ? 0x9e3779b97f4a7c15ull : cells_[top].hash) ^
             (uint64_t{cell.task} + 0x632be59bd9b4e019ull));
+        cell.rest = std::min(kInfinite, task_cost_[cell.task] +
+            (top == kNone ? 0 : cells_[top].rest));
         cells_.push_back(cell);
         top = static_cast<uint32_t>(cells_.size() - 1);
       }
+      const uint64_t done = executed_.size();
+      const bool too_long = done + (top == kNone ? 0 : cells_[top].rest) > bound_;
+      cut_ = cut_ || too_long;
+      // Seen with as few actions done: nothing new from here
       const uint64_t key = mix(state_hash_ ^ (top == kNone ? 0x51ull : cells_[top].hash));
-      if (!seen_.insert(key).second) {
+      bool repeated = false;
+      if (!too_long) {
+        auto [it, fresh] = seen_.emplace(key, done);
+        repeated = !fresh && it->second <= done;
+        if (!fresh && it->second > done) {
+          it->second = done;
+        }
+      }
+      if (too_long || repeated) {
         cells_.resize(choice.cells);
         nodes_.resize(choice.nodes);
         continue;
@@ -378,7 +467,13 @@ private:
   uint32_t top_ = kNone;
   std::vector<Choice> choices_;
   std::vector<std::pair<uint32_t, uint32_t>> choice_task_;  // task and node of each choice
-  std::unordered_set<uint64_t> seen_;
+  std::unordered_map<uint64_t, uint64_t> seen_;  // state and stack -> fewest actions done
+  std::vector<uint64_t> task_cost_;
+  std::vector<uint64_t> method_cost_;
+  std::vector<std::vector<uint32_t>> methods_;  // of each task, cheapest first
+  std::vector<uint32_t> initial_;
+  uint64_t bound_ = 0;
+  bool cut_ = false;  // some branch was cut by the bound in this iteration
   uint64_t expansions_ = 0;
 };
 

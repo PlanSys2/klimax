@@ -46,11 +46,16 @@ struct Result
 
 /**
  * @brief Depth-first progression: the first task of the stack is executed if it is an action,
- * or replaced by the subtasks of one of its methods, tried in the order written; a state and
- * stack already seen are not searched again.
+ * or replaced by the subtasks of one of its methods; a state and stack already seen with as few
+ * actions done are not searched again.
  *
- * Complete on a finite space; finds the first plan, not a short one. Every task network must be
- * totally ordered.
+ * Methods are tried from the one that can be decomposed into fewest actions. The search is
+ * repeated with a bound on the length of the plan that doubles each time: the actions done plus
+ * the fewest the pending tasks can take (a lower bound from the decomposition graph) must not
+ * exceed it. So the plan found is at most twice as long as needed by that measure, and a
+ * recursion that does not progress is cut.
+ *
+ * Complete on a finite space. Every task network must be totally ordered.
  */
 Result total_order(const tdg::Problem & problem, kairos::Budget * budget = nullptr);
 

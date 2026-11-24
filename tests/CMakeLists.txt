@@ -108,3 +108,17 @@ if(KLIMAX_BUILD_CLI)
   set_tests_properties(cli_solve_partial_order PROPERTIES
     PASS_REGULAR_EXPRESSION "==>.*move kobuki bedroom hall.*<==")
 endif()
+
+if(KLIMAX_BUILD_CLI)
+  # Names in the plan are spelled as in the input, whatever their case
+  file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/case-domain.hddl
+    "(define (domain D) (:requirements :hierarchy) (:predicates (Done))
+     (:task DoIt :parameters ()) (:method TheWay :parameters () :task (DoIt)
+     :ordered-subtasks (ActNow)) (:action ActNow :parameters () :effect (Done)))")
+  file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/case-problem.hddl
+    "(define (problem P) (:domain D) (:htn :subtasks (DoIt)) (:init))")
+  add_test(NAME cli_solve_keeps_case COMMAND klimax_cli
+    ${CMAKE_CURRENT_BINARY_DIR}/case-domain.hddl ${CMAKE_CURRENT_BINARY_DIR}/case-problem.hddl)
+  set_tests_properties(cli_solve_keeps_case PROPERTIES
+    PASS_REGULAR_EXPRESSION "ActNow.*DoIt -> TheWay")
+endif()

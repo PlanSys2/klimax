@@ -175,6 +175,56 @@ TEST(TotalOrderTest, PartialOrderInOneOrder)
   EXPECT_LT(o.result.plan.find("drop r1 book d"), o.result.plan.find("drop r1 cup a"));
 }
 
+// a1 enables b1 and b1 enables a2: the two tasks must be interleaved, which no order of them does
+TEST(TotalOrderTest, InterleavedTasks)
+{
+  auto d = hddl::parse_domain(
+    "(define (domain Turns) (:requirements :hierarchy)\n"
+    " (:predicates (first) (second))\n"
+    " (:task A :parameters ()) (:task B :parameters ())\n"
+    " (:method mA :parameters () :task (A) :ordered-subtasks (and (a1) (a2)))\n"
+    " (:method mB :parameters () :task (B) :ordered-subtasks (b1))\n"
+    " (:action a1 :parameters () :effect (first))\n"
+    " (:action b1 :parameters () :precondition (first) :effect (second))\n"
+    " (:action a2 :parameters () :precondition (second) :effect (not (first))))", "d.hddl");
+  auto p = hddl::parse_problem(
+    "(define (problem p) (:domain Turns) (:htn :subtasks (and (A) (B))) (:init))", "p.hddl");
+  ASSERT_TRUE(d.ok() && p.ok());
+  auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+  ASSERT_TRUE(m.ok());
+  auto g = tdg::ground(m.value());
+  ASSERT_TRUE(g.ok());
+  Result r = total_order(g.value());
+  ASSERT_EQ(r.outcome, Outcome::Solved) << r.message;
+  EXPECT_EQ(r.message, "best first, partial order");
+  const verifier::Outcome v = verifier::verify(m.value(), r.plan);
+  EXPECT_TRUE(v.valid) << v.reason << "\n" << r.plan;
+  EXPECT_LT(r.plan.find(" a1"), r.plan.find(" b1"));
+  EXPECT_LT(r.plan.find(" b1"), r.plan.find(" a2"));
+}
+
+// With the tasks ordered, the same problem has no plan: proved, every interleaving being none
+TEST(TotalOrderTest, OrderedTasksThatNeedInterleaving)
+{
+  auto d = hddl::parse_domain(
+    "(define (domain Turns) (:requirements :hierarchy)\n"
+    " (:predicates (first) (second))\n"
+    " (:task A :parameters ()) (:task B :parameters ())\n"
+    " (:method mA :parameters () :task (A) :ordered-subtasks (and (a1) (a2)))\n"
+    " (:method mB :parameters () :task (B) :ordered-subtasks (b1))\n"
+    " (:action a1 :parameters () :effect (first))\n"
+    " (:action b1 :parameters () :precondition (first) :effect (second))\n"
+    " (:action a2 :parameters () :precondition (second) :effect (not (first))))", "d.hddl");
+  auto p = hddl::parse_problem(
+    "(define (problem p) (:domain Turns) (:htn :ordered-subtasks (and (A) (B))) (:init))",
+    "p.hddl");
+  auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+  ASSERT_TRUE(m.ok());
+  auto g = tdg::ground(m.value());
+  ASSERT_TRUE(g.ok());
+  EXPECT_EQ(total_order(g.value()).outcome, Outcome::Unsolvable);
+}
+
 // Each way of searching alone finds a valid plan
 TEST(TotalOrderTest, EveryModeAlone)
 {

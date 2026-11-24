@@ -148,7 +148,8 @@ GPL. Se reconsideran si la medida lo pide.
   anytime con callback, memoria con presupuesto.
 - Salida: plan primitivo y árbol de descomposición en el formato del IPC.
 - `check` y `validate` como órdenes, con diagnósticos de fichero, línea y columna.
-- Después: módulo Python, UPF y plugin de PlanSys2.
+- Módulo Python y motor de unified-planning en cuanto haya HTN puro (H3b): es donde está hoy la
+  comunidad activa. El plugin de PlanSys2, después.
 
 ## 5. Fases
 
@@ -160,10 +161,11 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 | H1 | 🔄 | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
 | H2 | ⏳ | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
 | H3 | ⏳ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
+| H3b | ⏳ | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
 | H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
 | H5 | ⏳ | Numérico | Más de 91/140 en el banco de Quenard |
-| H6 | ⏳ | Temporal: HDDL 2.1 completo, banco de referencia propio (3.1) | Resuelve el banco; planes validados |
-| H7 | ⏳ | Robustez, fuzzing, banco por característica, Python, UPF, PlanSys2, versión 1.0.0 | Como Kairos |
+| H6 | ⏳ | Temporal: HDDL 2.1 completo, banco de referencia propio (3.1); Aries, vía unified-planning, como rival | Resuelve el banco; planes validados; comparación con Aries en los problemas que ambos expresan |
+| H7 | ⏳ | Robustez, fuzzing, banco por característica, PlanSys2, versión 1.0.0 | Como Kairos |
 | H8 | ⏳ | IPC 2027 y artículo | Según el calendario del IPC |
 
 H0 está cerrada: la línea base reproduce el orden del IPC 2023 (`docs/baseline.md`). Objetivo a
@@ -205,6 +207,11 @@ Detalle de H1:
 - ✅ `klimax --verify` en el ejecutable.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
+
+Actividad de los proyectos (noviembre de 2026): el código público de PANDA, Lilotane y PDDL4J
+lleva parado desde 2023–2024, y el repositorio de HDDL 2.1 desde enero de 2025. Los proyectos con
+desarrollo continuo son Aries y unified-planning. De ahí que la integración con unified-planning
+se adelante (H3b) y que el rival en la parte temporal sea Aries, no PANDA.
 
 ## 6. Riesgos
 

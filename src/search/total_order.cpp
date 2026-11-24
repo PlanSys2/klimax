@@ -380,6 +380,14 @@ public:
     // the methods in their fixed order. They take turns, each turn with twice the work of
     // the one before, so that the total is at most a few times what the better one needs.
     const bool trace = std::getenv("KLIMAX_TRACE_SEARCH") != nullptr;
+    // Share of each way in a turn: best first with the free and with the ordered relaxation,
+    // depth first guided and in fixed order (KLIMAX_TURNS=a,b,c,d to try others)
+    // Measured at 1 s on the total-order benchmark of IPC 2023: equal shares solve 420, twice
+    // for the first one 413 (more at 100 ms, fewer in Logistics)
+    uint64_t share[4] = {1, 1, 1, 1};
+    if (const char * given = std::getenv("KLIMAX_TURNS")) {
+      std::sscanf(given, "%lu,%lu,%lu,%lu", &share[0], &share[1], &share[2], &share[3]);
+    }
     for (uint64_t turn = 4000; ; turn *= 2) {
       for (Bf & search : bfs_) {
         if (search.relaxed == nullptr || search.over) {
@@ -388,7 +396,10 @@ public:
         bf_ = &search;
         relaxed_ = search.relaxed;
         evaluated_ = false;
-        limit_ = work_ + turn;
+        limit_ = work_ + turn * share[search.relaxed->ordered() ? 1 : 0];
+        if (limit_ == work_) {
+          continue;
+        }
         const Outcome outcome = best_first(result);
         relaxed_ = free_.get();
         evaluated_ = false;
@@ -404,6 +415,8 @@ public:
         if (outcome == Outcome::Solved || outcome == Outcome::Unsolvable) {
           result.outcome = outcome;
           result.steps = bf_steps_;
+          result.message = search.relaxed->ordered() ? "best first, ordered relaxation" :
+            "best first, free relaxation";
           return result;
         }
         if (budget_ != nullptr && budget_->exhausted()) {
@@ -416,7 +429,10 @@ public:
           continue;
         }
         guided_ = guided;
-        limit_ = relaxed_ == nullptr ? ~uint64_t{0} : work_ + turn;
+        limit_ = relaxed_ == nullptr ? ~uint64_t{0} : work_ + turn * share[guided ? 2 : 3];
+        if (limit_ == work_) {
+          continue;
+        }
         for (uint64_t bound = guided ? guided_bound : std::max<uint64_t>(least, 1); ;
           bound *= 2)
         {
@@ -431,6 +447,7 @@ public:
           }
           if (outcome == Outcome::Solved || (outcome == Outcome::Unsolvable && !cut_)) {
             result.outcome = outcome;  // without cuts, the whole space was searched
+            result.message = guided ? "depth first, guided" : "depth first, fixed order";
             return result;
           }
           if (outcome == Outcome::OutOfBudget) {

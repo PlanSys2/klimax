@@ -39,7 +39,7 @@ struct Result
 {
   Outcome outcome = Outcome::Unsupported;
   std::string plan;     // Solved: in the format of the IPC HTN tracks
-  std::string message;
+  std::string message;  // Unsupported: what; otherwise, which way of searching answered
   size_t steps = 0;         // actions of the plan
   uint64_t expansions = 0;  // tasks taken from the stack
 };

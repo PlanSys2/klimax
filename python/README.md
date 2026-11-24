@@ -25,8 +25,8 @@ if result.status == klimax.Status.SOLVED:
   `on_plan(plan, steps)` with each, until none is left or the time runs out; `optimal` says
   whether the last one was proved the shortest.
 - `check(domain, problem)`: every error found, with file, line and column.
-- `verify(domain, problem, plan)`: whether a plan in the IPC format solves the problem, and why
-  not.
+- `verify(domain, problem, plan, decomposition=False)`: whether a plan in the IPC format
+  solves the problem, and why not; with `decomposition`, a valid plan also as steps.
 
 Hierarchical problems without time or numbers, with total or partial order. To build from
 source, Kairos must be installed with `-DKAIROS_INSTALL_CORE=ON`:

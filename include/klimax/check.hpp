@@ -93,11 +93,31 @@ KLIMAX_API GroundResult ground(
   std::string_view domain_file = "domain.hddl", std::string_view problem_file = "problem.hddl",
   std::string_view plan = {});
 
+/// @brief A step of a plan: an action, or a task with the method that decomposes it.
+struct PlanStep
+{
+  std::string id;                 // as in the plan
+  std::string task;
+  std::vector<std::string> args;  // objects
+  bool primitive = false;
+  // Abstract tasks only
+  std::string method;
+  std::vector<std::string> params;    // objects, by parameter of the method
+  std::vector<std::string> subtasks;  // ids, by subtask of the method as written in the domain
+  std::vector<std::string> labels;    // of those subtasks in the domain; "" where not given
+};
+
 struct VerifyResult
 {
   bool valid = false;
   std::string reason;                   // why the plan is not valid, in one sentence
   std::vector<Diagnostic> diagnostics;  // errors in the domain or the problem, if any
+  // With `decomposition`, of a valid plan: every step, the actions in the order of execution
+  // and the tasks of the initial task network (ids, with the labels the problem gives them)
+  std::vector<PlanStep> steps_of_plan;
+  std::vector<std::string> sequence;
+  std::vector<std::string> roots;
+  std::vector<std::string> root_labels;
 };
 
 /**
@@ -109,7 +129,8 @@ struct VerifyResult
  */
 KLIMAX_API VerifyResult verify(
   std::string_view domain, std::string_view problem, std::string_view plan,
-  std::string_view domain_file = "domain.hddl", std::string_view problem_file = "problem.hddl");
+  std::string_view domain_file = "domain.hddl", std::string_view problem_file = "problem.hddl",
+  bool decomposition = false);
 
 }  // namespace klimax
 

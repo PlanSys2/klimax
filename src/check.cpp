@@ -104,6 +104,38 @@ std::string with_original_names(const std::string & plan, const Spelling & spell
   return out;
 }
 
+// The decomposition of a verified plan in the public structures, with the spelling of the input
+template<typename Out>
+void fill(Out & result, verifier::Tree & tree, const Spelling & spelling)
+{
+  auto name = [&](std::string & word) {
+      if (const auto it = spelling.find(word); it != spelling.end()) {
+        word = it->second;
+      }
+    };
+  for (verifier::Step & step : tree.steps) {
+    PlanStep out;
+    name(step.task);
+    name(step.method);
+    std::for_each(step.args.begin(), step.args.end(), name);
+    std::for_each(step.params.begin(), step.params.end(), name);
+    std::for_each(step.labels.begin(), step.labels.end(), name);
+    out.id = std::move(step.id);
+    out.task = std::move(step.task);
+    out.args = std::move(step.args);
+    out.primitive = step.primitive;
+    out.method = std::move(step.method);
+    out.params = std::move(step.params);
+    out.subtasks = std::move(step.subtasks);
+    out.labels = std::move(step.labels);
+    result.steps_of_plan.push_back(std::move(out));
+  }
+  std::for_each(tree.root_labels.begin(), tree.root_labels.end(), name);
+  result.sequence = std::move(tree.sequence);
+  result.roots = std::move(tree.roots);
+  result.root_labels = std::move(tree.root_labels);
+}
+
 // The first line of `plan` whose action or decomposition is not in the ground problem
 std::string first_missing(
   const hddl::Model & model, const tdg::Problem & ground, std::string_view plan)
@@ -317,32 +349,7 @@ SolveResult solve(
             result.plan.clear();
             break;
           }
-          auto name = [&](std::string & word) {
-              if (const auto it = spelling.find(word); it != spelling.end()) {
-                word = it->second;
-              }
-            };
-          for (verifier::Step & step : tree.steps) {
-            PlanStep out;
-            name(step.task);
-            name(step.method);
-            std::for_each(step.args.begin(), step.args.end(), name);
-            std::for_each(step.params.begin(), step.params.end(), name);
-            std::for_each(step.labels.begin(), step.labels.end(), name);
-            out.id = std::move(step.id);
-            out.task = std::move(step.task);
-            out.args = std::move(step.args);
-            out.primitive = step.primitive;
-            out.method = std::move(step.method);
-            out.params = std::move(step.params);
-            out.subtasks = std::move(step.subtasks);
-            out.labels = std::move(step.labels);
-            result.steps_of_plan.push_back(std::move(out));
-          }
-          std::for_each(tree.root_labels.begin(), tree.root_labels.end(), name);
-          result.sequence = std::move(tree.sequence);
-          result.roots = std::move(tree.roots);
-          result.root_labels = std::move(tree.root_labels);
+          fill(result, tree, spelling);
         }
       }
       break;
@@ -373,7 +380,7 @@ std::string_view to_string(Status status)
 
 VerifyResult verify(
   std::string_view domain, std::string_view problem, std::string_view plan,
-  std::string_view domain_file, std::string_view problem_file)
+  std::string_view domain_file, std::string_view problem_file, bool decomposition)
 {
   VerifyResult result;
   auto d = hddl::parse_domain(domain, domain_file);
@@ -390,9 +397,14 @@ VerifyResult verify(
     result.reason = "the domain or the problem has errors";
     return result;
   }
-  verifier::Outcome outcome = verifier::verify(model.value(), plan);
+  verifier::Tree tree;
+  verifier::Outcome outcome = verifier::verify(
+    model.value(), plan, decomposition ? &tree : nullptr);
   result.valid = outcome.valid;
   result.reason = std::move(outcome.reason);
+  if (result.valid && decomposition) {
+    fill(result, tree, spelling_of(domain, problem));
+  }
   return result;
 }
 

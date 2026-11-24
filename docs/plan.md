@@ -162,7 +162,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 | H2 | ✅ | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
 | H3 | ✅ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
 | H3b | ✅ | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
-| H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
+| H4 | 🔄 | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
 | H5 | ⏳ | Numérico | Más de 91/140 en el banco de Quenard |
 | H6 | ⏳ | Temporal: HDDL 2.1 completo, banco de referencia propio (3.1); Aries, vía unified-planning, como rival | Resuelve el banco; planes validados; comparación con Aries en los problemas que ambos expresan |
 | H7 | ⏳ | Robustez, fuzzing, banco por característica, PlanSys2, versión 1.0.0 | Como Kairos |
@@ -384,6 +384,31 @@ Detalle de H3b:
 - ✅ Criterio de salida: Klimax resuelve desde unified-planning los problemas jerárquicos que
   su modelo expresa (el ejemplo de UPF, los de las pruebas y 27 dominios del IPC), con los
   planes verificados.
+
+Detalle de H4:
+
+- ✅ Modo anytime (`SolveOptions::anytime` y `on_plan`, `klimax --anytime`, `anytime=True` en
+  Python): tras el primer plan, búsqueda en profundidad con una cota de una acción menos que el
+  mejor plan hasta entonces. Cuando agota el espacio bajo la cota, el plan es el más corto y lo
+  dice (`optimal`). Solo con orden total: con orden parcial mejora, pero no demuestra.
+  - Medido a 3 s en orden total (`bench/htn/anytime_check.py`): de 450 problemas resueltos,
+    mejora el primer plan en 69 y demuestra el más corto en 247. Ningún planificador de la
+    línea base encontró un plan más corto en ninguno de esos 247.
+  - Frente al mejor plan de la línea base (a 30 s): más corto en 18, igual en 287, más largo
+    en 140. Ahí está el margen para la puntuación satisficing.
+  - Limitación: la demostración necesita que toda recursión cueste acciones. Un método que se
+    llama a sí mismo sin ejecutar nada da un espacio infinito bajo cualquier cota, y entonces
+    termina por tiempo, sin demostrar.
+- ✅ En UPF: `AnytimePlanner(name="klimax")` da los planes según mejoran, y con la métrica de
+  longitud (`MinimizeSequentialPlanLength`) un plan demostrado más corto vuelve como
+  `SOLVED_OPTIMALLY`. `verify` da también la descomposición de un plan (para los intermedios).
+- ⏳ Búsqueda óptima de verdad (A* con heurística admisible) y medida frente a las
+  configuraciones óptimas de PANDA: no están en la línea base, hay que medirlas.
+- ⏳ Calidad de los planes: 140 problemas donde otro planificador da un plan más corto.
+- ⏳ Heurísticas sobre la relajación RC más finas (landmarks, LM-cut).
+- ⏳ Replanificación y reparación de planes en UPF.
+- ⏳ Lo aplazado de H2: motor lifted (44 problemas), Hiking, Rover, Woodworking,
+  Blocksworld-GTOHP, Monroe parcialmente observable.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

@@ -57,6 +57,16 @@ def test_decomposition():
     assert plain.status == klimax.Status.SOLVED and not plain.steps_of_plan
 
 
+def test_decomposition_of_a_given_plan():
+    problem = (DATA / "p1-total-order.hddl").read_text()
+    solved = klimax.solve(DOMAIN, problem)
+    report = klimax.verify(DOMAIN, problem, solved.plan, decomposition=True)
+    assert report.valid and report.sequence == solved.sequence
+    assert report.roots == solved.roots
+    assert [s.id for s in report.steps_of_plan] == [s.id for s in solved.steps_of_plan]
+    assert not klimax.verify(DOMAIN, problem, solved.plan).steps_of_plan
+
+
 def test_a_wrong_plan_is_not_valid():
     problem = (DATA / "p1-total-order.hddl").read_text()
     plan = klimax.solve(DOMAIN, problem).plan

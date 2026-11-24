@@ -100,6 +100,10 @@ NB_MODULE(_klimax, m)
   nb::class_<klimax::VerifyResult>(m, "VerifyResult")
   .def_ro("valid", &klimax::VerifyResult::valid)
   .def_ro("reason", &klimax::VerifyResult::reason)
+  .def_ro("steps_of_plan", &klimax::VerifyResult::steps_of_plan)
+  .def_ro("sequence", &klimax::VerifyResult::sequence)
+  .def_ro("roots", &klimax::VerifyResult::roots)
+  .def_ro("root_labels", &klimax::VerifyResult::root_labels)
   .def_ro("diagnostics", &klimax::VerifyResult::diagnostics);
 
   m.def("check",
@@ -132,9 +136,9 @@ NB_MODULE(_klimax, m)
 
   m.def("verify",
     [](const std::string & domain, const std::string & problem, const std::string & plan,
-    const std::string & domain_file, const std::string & problem_file) {
+    bool decomposition, const std::string & domain_file, const std::string & problem_file) {
       nb::gil_scoped_release release;
-      return klimax::verify(domain, problem, plan, domain_file, problem_file);
-    }, "domain"_a, "problem"_a, "plan"_a, "domain_file"_a = "domain.hddl",
-    "problem_file"_a = "problem.hddl");
+      return klimax::verify(domain, problem, plan, domain_file, problem_file, decomposition);
+    }, "domain"_a, "problem"_a, "plan"_a, "decomposition"_a = false,
+    "domain_file"_a = "domain.hddl", "problem_file"_a = "problem.hddl");
 }

@@ -53,20 +53,6 @@ struct SolveOptions
   std::function<void(const std::string & plan, size_t steps)> on_plan;
 };
 
-/// @brief A step of a plan: an action, or a task with the method that decomposes it.
-struct PlanStep
-{
-  std::string id;                 // as in `SolveResult::plan`
-  std::string task;
-  std::vector<std::string> args;  // objects
-  bool primitive = false;
-  // Abstract tasks only
-  std::string method;
-  std::vector<std::string> params;    // objects, by parameter of the method
-  std::vector<std::string> subtasks;  // ids, by subtask of the method as written in the domain
-  std::vector<std::string> labels;    // of those subtasks in the domain; "" where not given
-};
-
 struct SolveResult
 {
   Status status = Status::InvalidInput;

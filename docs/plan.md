@@ -234,7 +234,7 @@ Detalle de H2:
   | | 100 ms | 1 s | 30 s |
   |---|---|---|---|
   | Klimax, orden fijo | 198 | 264 | 330 |
-  | Klimax, con heurística por turnos | 195 | 292 | por medir |
+  | Klimax, con heurística por turnos | 195 | 300 | 372 |
   | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
   | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
   | HyperTensioN | 52 | 298 | 332 |

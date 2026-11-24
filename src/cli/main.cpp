@@ -26,7 +26,7 @@ namespace
 
 void print_usage(std::ostream & out)
 {
-  out << "Usage: klimax DOMAIN PROBLEM [--timeout SECONDS] [--anytime]\n"
+  out << "Usage: klimax DOMAIN PROBLEM [--timeout SECONDS] [--anytime] [--no-verify]\n"
       << "       klimax --check DOMAIN PROBLEM\n"
       << "       klimax --verify DOMAIN PROBLEM PLAN\n"
       << "       klimax --ground DOMAIN PROBLEM [SECONDS]\n"
@@ -35,6 +35,7 @@ void print_usage(std::ostream & out)
       << "the plan and its decomposition are written in the format of the IPC HTN tracks.\n"
       << "  --anytime go on after the first plan, looking for shorter ones, until none is\n"
       << "            left or the time runs out; the shortest found is written\n"
+      << "  --no-verify  do not check the plan with the verifier before writing it\n"
       << "  --check   read the domain and the problem and report every error\n"
       << "  --verify  check a plan in the format of the IPC HTN tracks\n"
       << "  --ground  ground the problem and print its size\n";
@@ -105,7 +106,8 @@ int ground(
 
 // Exit codes: 0 solved, 1 errors in the input, 2 bad usage, 10 unsolvable, 11 out of time,
 // 12 not supported
-int solve(const char * domain_path, const char * problem_path, double seconds, bool anytime)
+int solve(
+  const char * domain_path, const char * problem_path, double seconds, bool anytime, bool verify)
 {
   auto domain = read_file(domain_path);
   auto problem = read_file(problem_path);
@@ -115,6 +117,7 @@ int solve(const char * domain_path, const char * problem_path, double seconds, b
   klimax::SolveOptions options;
   options.seconds = seconds;
   options.anytime = anytime;
+  options.verify = verify;
   if (anytime) {
     options.on_plan = [](const std::string &, size_t steps) {
         std::cerr << "; plan of " << steps << " actions\n";
@@ -172,18 +175,21 @@ int main(int argc, char ** argv)
   if (argc >= 3 && argv[1][0] != '-') {
     double seconds = 0.0;
     bool anytime = false;
+    bool verify = true;
     for (int i = 3; i < argc; ++i) {
       const std::string_view arg = argv[i];
       if (arg == "--timeout" && i + 1 < argc) {
         seconds = std::stod(argv[++i]);
       } else if (arg == "--anytime") {
         anytime = true;
+      } else if (arg == "--no-verify") {
+        verify = false;
       } else {
         print_usage(std::cerr);
         return 2;
       }
     }
-    return solve(argv[1], argv[2], seconds, anytime);
+    return solve(argv[1], argv[2], seconds, anytime, verify);
   }
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];

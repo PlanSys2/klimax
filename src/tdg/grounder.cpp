@@ -1081,7 +1081,9 @@ private:
         stack.push_back(m);
       }
     }
-    p_.unsolvable = stack.empty();
+    // Kairos empties a goal that needs an atom no action instance reaches, and says so: without
+    // looking at that, the empty goal would hold in any state
+    p_.unsolvable = stack.empty() || p_.pddl.goal_unreachable;
     while (!stack.empty()) {
       const uint32_t m = stack.back();
       stack.pop_back();

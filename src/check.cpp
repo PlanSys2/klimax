@@ -320,7 +320,10 @@ SolveResult solve(
     how.anytime = options.anytime;
     if (options.on_plan) {
       how.on_plan = [&](const std::string & plan, size_t steps) {
-          options.on_plan(with_original_names(plan, spelling_of(domain, problem)), steps);
+          // Only plans that the verifier accepts leave the library
+          if (!options.verify || verifier::verify(model.value(), plan).valid) {
+            options.on_plan(with_original_names(plan, spelling_of(domain, problem)), steps);
+          }
         };
     }
     found = search::total_order(ground.value(), &budget, how);
@@ -340,16 +343,19 @@ SolveResult solve(
       {
         const Spelling spelling = spelling_of(domain, problem);
         result.plan = with_original_names(found.plan, spelling);
-        if (options.decomposition) {
+        if (options.verify || options.decomposition) {
           verifier::Tree tree;
-          const verifier::Outcome checked = verifier::verify(model.value(), found.plan, &tree);
+          const verifier::Outcome checked = verifier::verify(
+            model.value(), found.plan, options.decomposition ? &tree : nullptr);
           if (!checked.valid) {
             result.status = Status::InternalError;
             result.message = "the plan found is not valid: " + checked.reason;
             result.plan.clear();
             break;
           }
-          fill(result, tree, spelling);
+          if (options.decomposition) {
+            fill(result, tree, spelling);
+          }
         }
       }
       break;

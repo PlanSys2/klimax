@@ -115,10 +115,11 @@ NB_MODULE(_klimax, m)
 
   m.def("solve",
     [](const std::string & domain, const std::string & problem, double timeout,
-    bool decomposition, bool anytime, nb::object on_plan, const std::string & domain_file,
-    const std::string & problem_file) {
+    bool decomposition, bool anytime, nb::object on_plan, bool verify,
+    const std::string & domain_file, const std::string & problem_file) {
       klimax::SolveOptions options;
       options.seconds = timeout;
+      options.verify = verify;
       options.decomposition = decomposition;
       options.anytime = anytime;
       if (!on_plan.is_none()) {
@@ -131,8 +132,8 @@ NB_MODULE(_klimax, m)
       nb::gil_scoped_release release;
       return klimax::solve(domain, problem, options, domain_file, problem_file);
     }, "domain"_a, "problem"_a, "timeout"_a = 0.0, "decomposition"_a = true,
-    "anytime"_a = false, "on_plan"_a = nb::none(), "domain_file"_a = "domain.hddl",
-    "problem_file"_a = "problem.hddl");
+    "anytime"_a = false, "on_plan"_a = nb::none(), "verify"_a = true,
+    "domain_file"_a = "domain.hddl", "problem_file"_a = "problem.hddl");
 
   m.def("verify",
     [](const std::string & domain, const std::string & problem, const std::string & plan,

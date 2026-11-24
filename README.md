@@ -46,7 +46,9 @@ the method in [docs/results.md](docs/results.md) and [docs/baseline.md](docs/bas
 - **Proves** when a problem has no plan, instead of running out of time.
 - **Anytime**: after the first plan it goes on to shorter ones and, when none is left, says that
   the plan is the shortest.
-- **Verifies** hierarchical plans in the format of the IPC, independently of the planner.
+- **Verifies** hierarchical plans in the format of the IPC, independently of the planner, and
+  its own before returning them: a plan the verifier rejects is reported as an internal error,
+  never given.
 - **Checks** a domain and a problem and reports every error with file, line and column.
 - **Library first**: no global state, a time limit on every call, plans returned as data.
 
@@ -57,6 +59,7 @@ the method in [docs/results.md](docs/results.md) and [docs/baseline.md](docs/bas
 ```
 klimax DOMAIN PROBLEM [--timeout S]           # the plan and its decomposition, in the IPC format
 klimax DOMAIN PROBLEM --timeout S --anytime   # go on to shorter plans; says if none is shorter
+klimax DOMAIN PROBLEM --no-verify             # skip the check of the plan before writing it
 klimax --check DOMAIN PROBLEM                 # read the input and report every error
 klimax --verify DOMAIN PROBLEM PLAN           # check a plan in the format of the IPC HTN tracks
 ```

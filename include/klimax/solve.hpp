@@ -43,8 +43,12 @@ enum class Status : uint8_t
 struct SolveOptions
 {
   double seconds = 0.0;  // time limit for grounding and search together; 0: none
+  // Every plan is checked by the verifier, which shares nothing with the search, before it is
+  // returned: one that it rejects becomes Status::InternalError, never a plan. Turning it off
+  // saves that time (a third of the whole on plans of tens of thousands of actions).
+  bool verify = true;
   // Also give the plan as its decomposition (`SolveResult::steps_of_plan` and what follows it).
-  // The plan is verified for it, independently of the search.
+  // The verifier works it out, so this verifies the plan whatever `verify` says.
   bool decomposition = false;
   // Go on after the first plan, looking for shorter ones, until none is left or the time runs
   // out. The result is the shortest found; `SolveResult::optimal` says if it was proved so.

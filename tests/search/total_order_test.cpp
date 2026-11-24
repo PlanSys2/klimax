@@ -140,6 +140,11 @@ TEST(TotalOrderTest, StateGoal)
   Solved ok = solve(problem("(:htn :ordered-subtasks (bring cup a))", "(:goal (at r1 a))"));
   ASSERT_EQ(ok.result.outcome, Outcome::Solved);
   EXPECT_TRUE(ok.verified) << ok.why;
+  // Nothing the tasks can do holds the cup: a goal that no action reaches is no goal met
+  Solved never = solve(problem("(:htn :ordered-subtasks (bring cup a))", "(:goal (holding r1 cup))"));
+  EXPECT_EQ(never.result.outcome, Outcome::Unsolvable);
+  Solved nowhere = solve(problem("(:htn :ordered-subtasks (bring cup a))", "(:goal (winged r1))"));
+  EXPECT_EQ(nowhere.result.outcome, Outcome::Unsolvable);
   // Bringing the cup to a leaves the robot in a: it cannot also end in d
   Solved no = solve(problem("(:htn :ordered-subtasks (bring cup a))", "(:goal (at r1 d))"));
   EXPECT_EQ(no.result.outcome, Outcome::Unsolvable);

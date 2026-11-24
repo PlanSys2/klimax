@@ -16,10 +16,11 @@ if result.status == klimax.Status.SOLVED:
         print(step.id, step.task, step.args, step.method, step.subtasks)
 ```
 
-- `solve(domain, problem, timeout=0, decomposition=True)`: `status` is `SOLVED`, `UNSOLVABLE`
+- `solve(domain, problem, timeout=0, decomposition=True, anytime=False, on_plan=None,
+  verify=True)`: `status` is `SOLVED`, `UNSOLVABLE`
   (proved), `TIMEOUT`, `UNSUPPORTED`, `INVALID_INPUT` (see `diagnostics`) or `INTERNAL_ERROR`.
-  With `decomposition`, the plan is verified independently of the search before it is returned,
-  and given as steps: of each task, its method, the values of the method's parameters and which
+  Every plan is verified, independently of the search, before it is returned (`verify`).
+  With `decomposition` it is also given as steps: of each task, its method, the values of the method's parameters and which
   step is each of its subtasks.
   With `anytime=True` it goes on after the first plan looking for shorter ones, calling
   `on_plan(plan, steps)` with each, until none is left or the time runs out; `optimal` says

@@ -160,7 +160,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 | H0 | ✅ | Semántica de HDDL 2.1 por escrito; decisión sobre `kairos::core`; infraestructura de medida con PANDA, Lilotane, HyperTensioN, Aries, SIADEX y PDDL4J instalados | Línea base reproducida frente a los resultados del IPC 2023 |
 | H1 | ✅ | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
 | H2 | 🔄 | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
-| H3 | ⏳ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
+| H3 | 🔄 | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
 | H3b | ⏳ | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
 | H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
 | H5 | ⏳ | Numérico | Más de 91/140 en el banco de Quenard |
@@ -261,6 +261,8 @@ Detalle de H2:
   sin precondición daban cualquier tarea por hecha con coste 2). No sirve de prueba de
   imposibilidad, así que solo ordena. Dos búsquedas primero-el-mejor, una con cada relajación,
   se turnan con las dos en profundidad.
+- ✅ Lo que falta del objetivo debe poder producirlo alguna tarea que quede en la pila: corta
+  pronto las elecciones equivocadas de parámetros libres (Woodworking, Blocksworld-GTOHP).
 - ⏳ Dominios donde PandaDealer sigue por delante a 30 s: Logistics (48 frente a 74), Woodworking
   (9 frente a 20), Blocksworld-GTOHP (19 frente a 27; con una sola relajación eran 27), Robot
   (14 frente a 20) y Hiking (17 frente a 22).
@@ -276,6 +278,24 @@ Detalle de H2:
   intermedio» empatan en la estimación, que valora cada subtarea desde el mismo estado.
 - ✅ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761). Klimax:
   421 y 509. Por dominios a 30 s gana en 10, empata en 3 y pierde en 10.
+
+Detalle de H3 (empezada antes de cerrar del todo H2, porque el motor de orden total la daba
+casi hecha):
+
+- ✅ Linealización: un problema de orden parcial se busca con cada red de tareas en uno de los
+  órdenes que permite. Un plan así encontrado es un plan del problema; no encontrarlo no prueba
+  nada. Solo con esto, en la categoría de orden parcial del IPC 2023 (283 problemas): 140 a
+  100 ms, 181 a 1 s y 202 a 30 s. Los mejores de la línea base: 128 (Linear-Simple), 162
+  (Linear-Complex) y 207 (Linear-Simple).
+- ✅ Búsqueda primero-el-mejor sobre redes de orden parcial, que entrelaza las subtareas de
+  tareas distintas (necesario en PCP y Colouring). Es un modo más de los turnos cuando el
+  problema es de orden parcial; si agota su espacio, «sin solución» es una prueba.
+- ✅ Los planes se escriben con los nombres tal como están en la entrada: el verificador del IPC
+  distingue mayúsculas en su modo estricto.
+- 🔄 Medida con la búsqueda entrelazada (una estimación a 2 s, sin el arnés: 202 de 283, todos
+  los planes válidos según el verificador de Klimax).
+- ⏳ Reducir la ramificación del entrelazado (Colouring: 3 de 30).
+- ⏳ Criterio de salida: cobertura ≥ Linear y PANDApro.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

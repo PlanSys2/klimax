@@ -353,6 +353,15 @@ Detalle de H3b:
   al plan validado. Los 8 restantes se paran en el lector de UPF (nombres repetidos entre
   tipos y objetos en Barman, Freecell y Woodworking; sintaxis que no lee en Snake y Colouring;
   un tipo declarado dos veces en UM-Translog), no en Klimax. Son candidatos a aportar a UPF.
+- 🔄 Primera comparación con Aries (`up-aries` 0.5.0) por la vía UPF, en los 14 problemas de las
+  pruebas de `up-klimax`, validando los planes de cada uno con el validador del otro:
+  - `aries-val` acepta todos los planes de Klimax.
+  - En 9 problemas los dos resuelven y `klimax-val` acepta el plan de Aries.
+  - En `delivery` (orden total y parcial) Aries devuelve un plan que no es ejecutable: mueve
+    el robot entre dos habitaciones sin enlace. `klimax-val` lo rechaza, y también el
+    validador secuencial del propio UPF. Pendiente de aislar y, si se confirma, de comunicar.
+  - Aries no resuelve los tres problemas con cuantificadores (error interno) ni demuestra el
+    problema sin solución (agota el tiempo; Klimax lo demuestra en 30 ms).
 - ⏳ Aprovechar el resto de UPF:
   - Ofrecer la reescritura anterior como compilador de UPF: hoy no tiene ninguno para
     problemas jerárquicos, y le sirve a cualquier motor HTN.

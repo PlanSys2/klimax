@@ -213,5 +213,40 @@ TEST(VerifierTest, UnsupportedIsNeverAccepted)
   EXPECT_NE(o.reason.find("unsupported"), std::string::npos) << o.reason;
 }
 
+TEST(VerifierTest, ManyValuesForFreeParameters)
+{
+  // The method leaves four parameters free: 20736 values, chosen from what its precondition
+  // requires in the state. The initial task network leaves five, and any value will do
+  const char * domain =
+    "(define (domain d) (:requirements :typing :hierarchy :negative-preconditions)\n"
+    "(:types n)\n"
+    "(:predicates (next ?a ?b - n) (bad ?a - n) (seen ?a - n))\n"
+    "(:task walk :parameters ())\n"
+    "(:method chain :parameters (?a ?b ?c ?d - n) :task (walk)\n"
+    "  :precondition (and (next ?a ?b) (next ?b ?c) (next ?c ?d) (not (bad ?d)))\n"
+    "  :ordered-subtasks (and (see ?a)))\n"
+    "(:action see :parameters (?a - n) :precondition (and) :effect (seen ?a)))";
+  auto outcome = [&](std::string_view init, std::string_view plan) {
+      auto d = hddl::parse_domain(domain, "d.hddl");
+      auto p = hddl::parse_problem(
+        "(define (problem p) (:domain d)\n"
+        "(:objects n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 n10 n11 - n)\n"
+        "(:htn :parameters (?v ?w ?x ?y ?z - n) :subtasks (walk))\n"
+        "(:init " + std::string(init) + "))", "p.hddl");
+      EXPECT_TRUE(d.ok() && p.ok());
+      auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+      EXPECT_TRUE(m.ok());
+      return verify(m.value(), plan);
+    };
+  const char * plan = "==>\n1 see n4\nroot 2\n2 walk -> chain 1\n<==\n";
+  // Two chains from n4: the one through n9 ends in a bad object
+  const std::string init = "(next n4 n9) (next n9 n1) (next n1 n2) (bad n2) (next n4 n5) "
+    "(next n5 n6) (next n6 n7) (next n0 n1)";
+  Outcome o = outcome(init, plan);
+  EXPECT_TRUE(o.valid) << o.reason;
+  EXPECT_FALSE(outcome(init + " (bad n7)", plan).valid);
+  EXPECT_FALSE(outcome(init, "==>\n1 see n0\nroot 2\n2 walk -> chain 1\n<==\n").valid);
+}
+
 }  // namespace
 }  // namespace klimax::verifier

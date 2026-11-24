@@ -211,6 +211,22 @@ public:
     }
   }
 
+  // The atoms that `id` requires: those of its conjunctions, outside any other connective
+  void required(ast::FormulaId id, std::vector<ast::FormulaId> & atoms) const
+  {
+    const ast::Formula & f = nodes_.formulas[id];
+    if (f.kind == ast::FormulaKind::Atom) {
+      atoms.push_back(id);
+    } else if (f.kind == ast::FormulaKind::And) {
+      for (ast::FormulaId c : f.children) {
+        required(c, atoms);
+      }
+    }
+  }
+
+  const ast::Formula & formula(ast::FormulaId id) const {return nodes_.formulas[id];}
+  const ast::Term & term(ast::TermId id) const {return nodes_.terms[id];}
+
   // Collects what `id` adds and deletes when applied in `state`
   void effect(
     ast::EffectId id, const State & state, Env & env, std::vector<Atom> & adds,
@@ -383,6 +399,9 @@ struct Node
   uint32_t last_leaf = kNone;
   std::vector<std::vector<uint32_t>> bindings;  // abstract: values of the method's parameters
   size_t held = 0;  // the one of them its precondition held with
+  // Too many to list: the precondition chooses, from `partial` (kNone where free)
+  bool open = false;
+  std::vector<uint32_t> partial;
   // Events of the node in the precedence graph
   uint32_t start = 0;
   uint32_t test = kNone;
@@ -712,10 +731,27 @@ private:
     return true;
   }
 
-  // Every way of completing `binding` that respects types and variable constraints
+  bool consistent(const hddl::Network & net, const std::vector<uint32_t> & b) const
+  {
+    auto value = [&](const Arg & a) {return a.variable ? b[a.index] : a.index;};
+    for (const hddl::VarConstraint & c : net.constraints) {
+      if ((value(c.lhs) == value(c.rhs)) != c.equal) {
+        return false;
+      }
+    }
+    for (const hddl::SortConstraint & c : net.sorts) {
+      if (m_.domain.types.fits(object(b[c.param]).types, c.types) == c.negated) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // The ways of completing `binding` that respect types and variable constraints: all, or one
+  // if no `open` is given. Too many to list: `open` is set, and nothing is returned
   std::vector<std::vector<uint32_t>> complete(
     const std::vector<hddl::Param> & params, const hddl::Network & net,
-    std::vector<uint32_t> binding)
+    std::vector<uint32_t> binding, bool * open = nullptr)
   {
     std::vector<std::vector<uint32_t>> result;
     std::vector<uint32_t> free;
@@ -728,20 +764,6 @@ private:
         return result;
       }
     }
-    auto consistent = [&](const std::vector<uint32_t> & b) {
-        auto value = [&](const Arg & a) {return a.variable ? b[a.index] : a.index;};
-        for (const hddl::VarConstraint & c : net.constraints) {
-          if ((value(c.lhs) == value(c.rhs)) != c.equal) {
-            return false;
-          }
-        }
-        for (const hddl::SortConstraint & c : net.sorts) {
-          if (m_.domain.types.fits(object(b[c.param]).types, c.types) == c.negated) {
-            return false;
-          }
-        }
-        return true;
-      };
     std::vector<std::vector<uint32_t>> domains;
     for (uint32_t p : free) {
       std::vector<uint32_t> values;
@@ -765,10 +787,14 @@ private:
       if (empty) {
         break;
       }
-      if (consistent(binding)) {
+      if (consistent(net, binding)) {
         result.push_back(binding);
-        if (result.size() > 100000) {
-          invalid("too many values for the free parameters of a method");
+        if (open == nullptr) {
+          return result;
+        }
+        if (result.size() > kListed) {
+          *open = true;
+          return {};
         }
       }
       size_t i = 0;
@@ -811,8 +837,10 @@ private:
       invalid("step " + show(n) + ": its subtasks are not those of method " + method.name +
         ", or break its ordering, types or constraints");
     }
-    n.bindings = complete(method.params, method.network, binding);
-    if (n.bindings.empty()) {
+    n.bindings = complete(method.params, method.network, binding, &n.open);
+    if (n.open) {
+      n.partial = std::move(binding);
+    } else if (n.bindings.empty()) {
       invalid("step " + show(n) + ": the parameters of method " + method.name +
         " have the wrong types or break its constraints");
     }
@@ -867,6 +895,9 @@ private:
   bool precondition_holds(Node & n)
   {
     const hddl::MethodInfo & method = m_.methods[n.method];
+    if (n.open) {
+      return choose(n, method);
+    }
     if (method.precondition_action < 0) {
       return true;
     }
@@ -882,6 +913,144 @@ private:
       }
     }
     return false;
+  }
+
+  // An atom that a precondition requires, over the parameters of its method
+  struct Required
+  {
+    uint32_t predicate;
+    std::vector<Arg> args;
+  };
+
+  // Values for the free parameters of a method with which its precondition holds now: those
+  // that the atoms it requires leave in the state first, and by type the rest
+  bool choose(Node & n, const hddl::MethodInfo & method)
+  {
+    std::vector<Required> required;
+    const ast::Action * a = nullptr;
+    if (method.precondition_action >= 0) {
+      a = &m_.pddl.actions[static_cast<size_t>(method.precondition_action)];
+      std::vector<ast::FormulaId> atoms;
+      domain_.required(a->precondition, atoms);
+      for (ast::FormulaId id : atoms) {
+        const ast::Formula & f = domain_.formula(id);
+        Required r{domain_.predicate(f.name), {}};
+        bool usable = true;
+        for (ast::TermId t : f.args) {
+          const ast::Term & term = domain_.term(t);
+          if (term.kind == ast::TermKind::Name) {
+            r.args.push_back(Arg{false, domain_.object(term.name)});
+            continue;
+          }
+          size_t p = 0;
+          while (p < a->params.size() && a->params[p].name != term.name) {
+            ++p;
+          }
+          if (term.kind != ast::TermKind::Variable || p == a->params.size()) {
+            usable = false;
+            break;
+          }
+          r.args.push_back(Arg{true, method.precondition_params[p]});
+        }
+        if (usable) {
+          required.push_back(std::move(r));
+        }
+      }
+    }
+    std::unordered_map<uint32_t, std::vector<const Atom *>> facts;
+    for (const Required & r : required) {
+      facts[r.predicate];
+    }
+    for (const Atom & atom : state_) {
+      auto found = facts.find(atom[0]);
+      if (found != facts.end()) {
+        found->second.push_back(&atom);
+      }
+    }
+    size_t work = 0;
+    std::vector<uint32_t> binding = n.partial;
+    if (!choose(method, a, required, facts, binding, work)) {
+      return false;
+    }
+    n.bindings.assign(1, std::move(binding));
+    n.held = 0;
+    n.open = false;
+    return true;
+  }
+
+  bool choose(
+    const hddl::MethodInfo & method, const ast::Action * a,
+    const std::vector<Required> & required,
+    const std::unordered_map<uint32_t, std::vector<const Atom *>> & facts,
+    std::vector<uint32_t> & binding, size_t & work)
+  {
+    auto count = [&]() {
+        if (++work > kChoices) {
+          invalid("too many values for the free parameters of method " + method.name);
+        }
+      };
+    for (const Required & r : required) {
+      if (std::none_of(r.args.begin(), r.args.end(),
+        [&](const Arg & x) {return x.variable && binding[x.index] == kNone;}))
+      {
+        continue;
+      }
+      for (const Atom * atom : facts.at(r.predicate)) {
+        count();
+        std::vector<uint32_t> next = binding;
+        bool fits = atom->size() == r.args.size() + 1;
+        for (size_t i = 0; fits && i < r.args.size(); ++i) {
+          const uint32_t value = (*atom)[i + 1];
+          const Arg & x = r.args[i];
+          if (!x.variable) {
+            fits = x.index == value;
+          } else if (next[x.index] != kNone) {
+            fits = next[x.index] == value;
+          } else {
+            const auto & types = method.params[x.index].types;
+            fits = types.empty() || m_.domain.types.fits(object(value).types, types);
+            next[x.index] = value;
+          }
+        }
+        if (fits && choose(method, a, required, facts, next, work)) {
+          binding = std::move(next);
+          return true;
+        }
+      }
+      return false;  // nothing in the state for an atom that is required
+    }
+    // No required atom has a free parameter left: by type
+    for (uint32_t p = 0; p < method.params.size(); ++p) {
+      if (binding[p] != kNone) {
+        continue;
+      }
+      const auto & types = method.params[p].types;
+      for (uint32_t o = 0; o < m_.objects.objects.items.size(); ++o) {
+        if (!types.empty() && !m_.domain.types.fits(object(o).types, types)) {
+          continue;
+        }
+        count();
+        std::vector<uint32_t> next = binding;
+        next[p] = o;
+        if (choose(method, a, required, facts, next, work)) {
+          binding = std::move(next);
+          return true;
+        }
+      }
+      return false;
+    }
+    count();
+    if (!consistent(method.network, binding)) {
+      return false;
+    }
+    if (a == nullptr) {
+      return true;
+    }
+    Env env;
+    for (size_t p = 0; p < a->params.size(); ++p) {
+      env.emplace_back(a->params[p].name, binding[method.precondition_params[p]]);
+    }
+    return domain_.holds(a->precondition, state_, env);
   }
 
   // Places `e` and whatever becomes placeable; tests wait until their precondition holds
@@ -1017,6 +1186,9 @@ private:
 
   const Model & m_;
   PlanText plan_;
+  static constexpr size_t kListed = 10000;      // bindings of a method listed beforehand
+  static constexpr size_t kChoices = 50000000;  // steps choosing them from the state instead
+
   Interpreter domain_;
   Interpreter problem_;
   std::unordered_map<std::string, size_t> task_index_;

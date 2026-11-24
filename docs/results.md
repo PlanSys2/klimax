@@ -8,7 +8,7 @@ The method is that of the baseline.
 
 | Planner | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 220 | 383 | 554 |
+| **Klimax** | 255 | 434 | 565 |
 | PandaDealer agile-1 | 155 | 318 | 494 |
 | PandaDealer agile-lama | 162 | 308 | 494 |
 | PANDA lamda | 140 | 278 | 487 |
@@ -23,7 +23,7 @@ The method is that of the baseline.
 | SIADEX | 16 | 83 | 120 |
 | Aries | 8 | 29 | 60 |
 
-By domain at 30 s, against the best of the other configurations in each domain (not one planner: the best of each row). Klimax is ahead in 7 domains, level in 5 and behind in 11.
+By domain at 30 s, against the best of the other configurations in each domain (not one planner: the best of each row). Klimax is ahead in 8 domains, level in 6 and behind in 9.
 
 | Domain | # | Klimax | Best other | Which |
 |---|---|---|---|---|
@@ -33,29 +33,29 @@ By domain at 30 s, against the best of the other configurations in each domain (
 | Blocksworld-HPDDL | 30 | 23 | **24** | PandaDealer agile-1 |
 | Depots | 30 | **29** | 26 | Linear-Complex, Linear-Simple |
 | Factories-simple | 20 | 7 | **9** | PANDA lamda, PandaDealer agile-lama |
-| Freecell-Learned-ECAI-16 | 60 | **12** | 7 | Linear-Complex |
-| Hiking | 30 | 17 | **25** | HyperTensioN |
-| Lamps | 30 | 16 | **17** | PandaDealer agile-1, PandaDealer agile-lama |
-| Logistics-Learned-ECAI-16 | 80 | **74** | **74** | PandaDealer agile-1 |
+| Freecell-Learned-ECAI-16 | 60 | **13** | 7 | Linear-Complex |
+| Hiking | 30 | 18 | **25** | HyperTensioN |
+| Lamps | 30 | **17** | **17** | PandaDealer agile-1, PandaDealer agile-lama |
+| Logistics-Learned-ECAI-16 | 80 | **76** | 74 | PandaDealer agile-1 |
 | Minecraft-Player | 20 | **5** | **5** | HyperTensioN |
-| Minecraft-Regular | 59 | **53** | 49 | HyperTensioN |
+| Minecraft-Regular | 59 | **54** | 49 | HyperTensioN |
 | Monroe-Fully-Observable | 20 | **20** | **20** | HyperTensioN, Lilotane |
-| Monroe-Partially-Observable | 20 | 8 | **19** | Lilotane |
+| Monroe-Partially-Observable | 20 | 9 | **19** | Lilotane |
 | Multiarm-Blocksworld | 74 | **74** | **74** | PandaDealer agile-1, PandaDealer agile-lama |
-| Robot | 20 | 18 | **20** | Linear-Complex, Linear-Simple, PANDA lamda, PANDA ppro,... |
-| Rover-GTOHP | 30 | 22 | **27** | HyperTensioN |
+| Robot | 20 | **20** | **20** | Linear-Complex, Linear-Simple, PANDA lamda, PANDA ppro,... |
+| Rover-GTOHP | 30 | 23 | **27** | HyperTensioN |
 | Satellite-GTOHP | 20 | **20** | 16 | HyperTensioN |
 | SharpSAT | 21 | 10 | **11** | HyperTensioN |
 | Snake | 27 | 2 | **3** | Linear-Complex, PandaDealer agile-1, PandaDealer agile-... |
 | Towers | 20 | **17** | 11 | Linear-Complex, PANDA lamda, PANDA ppro, PandaDealer ag... |
 | Transport | 40 | **40** | 33 | Lilotane, PANDA lamda |
-| Woodworking | 30 | 15 | **30** | Lilotane, PDDL4J LiftedTreePath |
+| Woodworking | 30 | 16 | **30** | Lilotane, PDDL4J LiftedTreePath |
 
 ## Partial order: 283 problems
 
 | Planner | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 148 | 193 | 234 |
+| **Klimax** | 150 | 199 | 233 |
 | Linear-Simple | 128 | 161 | 207 |
 | Linear-Complex | 123 | 162 | 204 |
 | PANDA ppro | 101 | 118 | 156 |
@@ -64,14 +64,14 @@ By domain at 30 s, against the best of the other configurations in each domain (
 | Aries | 34 | 62 | 106 |
 | SIADEX | 28 | 85 | 93 |
 
-By domain at 30 s, against the best of the other configurations in each domain (not one planner: the best of each row). Klimax is ahead in 4 domains, level in 6 and behind in 1.
+By domain at 30 s, against the best of the other configurations in each domain (not one planner: the best of each row). Klimax is ahead in 4 domains, level in 5 and behind in 2.
 
 | Domain | # | Klimax | Best other | Which |
 |---|---|---|---|---|
 | Barman-BDI | 20 | **20** | 19 | SIADEX |
 | Colouring | 30 | **8** | 5 | Linear-Complex, Linear-Simple, PANDA lamda, PANDA ppro,... |
 | Monroe-Fully-Observable | 25 | **25** | 21 | Linear-Simple |
-| Monroe-Partially-Observable | 25 | **15** | **15** | Linear-Complex |
+| Monroe-Partially-Observable | 25 | 14 | **15** | Linear-Complex |
 | PCP | 17 | **14** | **14** | Linear-Complex, Linear-Simple, PANDA lamda, PANDA ppro,... |
 | Rover | 20 | **20** | **20** | Linear-Complex, Linear-Simple |
 | Satellite | 25 | **25** | **25** | Aries, Linear-Complex, Linear-Simple, PANDA lamda, PAND... |
@@ -83,25 +83,42 @@ By domain at 30 s, against the best of the other configurations in each domain (
 ## Optimal: the shortest plan, proved
 
 Klimax with `--anytime` counts when it proves that no plan has fewer actions. Against the
-optimal recipes of IPC 2023 that need no LP solver, at 1 s (longer limits are still to be
-measured):
+optimal recipes of IPC 2023 that need no LP solver, one run at 30 s per track (a slower run
+than those of the tables above, for the three planners alike: see the notes):
 
-| Planner | Total order (761) | Partial order (283) |
-|---|---|---|
-| **Klimax** | 240 | 91 |
-| PandaDealer optimal | 125 | - |
-| PANDA optimal (`rc2(lmc)`) | 118 | 96 |
+| Total order (761) | 100 ms | 1 s | 30 s |
+|---|---|---|---|
+| **Klimax** | 143 | 213 | 300 |
+| PandaDealer optimal | 48 | 109 | 180 |
+| PANDA optimal (`rc2(lmc)`) | 39 | 103 | 177 |
 
-Where Klimax and another planner both prove a plan the shortest, the lengths agree: in 124 of
-124 total-order problems and in 81 of 81 partial-order ones.
+| Partial order (283) | 100 ms | 1 s | 30 s |
+|---|---|---|---|
+| **Klimax** | 68 | 86 | 104 |
+| PANDA optimal (`rc2(lmc)`) | 66 | 91 | 114 |
+
+Where Klimax and another planner both prove a plan the shortest, the lengths agree: in 185 of
+185 total-order problems and in 98 of 98 partial-order ones.
+
+In total order Klimax proves at least as many as the others in every domain but Woodworking
+(15 against 16); the widest gaps are Minecraft-Regular (50 against 18), Monroe-Fully-Observable
+(20 against 3) and Satellite (20 against 4). In partial order the proof needs the search that
+interleaves subtasks, which keeps every node in memory: it stops at its limit in Colouring,
+Rover and Transport, and PANDA proves more in Colouring, Woodworking, Satellite and Monroe.
 
 ## Notes
 
-- The Klimax rows come from one run at 30 s per track, as those of the baseline do. The
-  total-order run was made on a machine about twice as slow as usual (every problem took about
-  twice as long as in a run at 1 s made the same day), which lowers its 100 ms and 1 s columns: a
-  separate run at 1 s solves 255 at 100 ms and 437 at 1 s. To be measured again.
-- Klimax answers "unsolvable" on 8 total-order problems of Minecraft-Player: the grounding proves
+- The Klimax rows come from one run at 30 s per track, as those of the baseline do, on the same
+  cores. The SharpSAT row comes from a later run of that domain: the verifier of Klimax gave up
+  on one of its plans (too many values for the variables of the initial task network), which
+  the IPC verifier accepts.
+- The runs of the optimal section were made with the power profile of the machine in `balanced`,
+  which on this machine halves the speed of a core after half a second of load: every problem
+  took about 2.2 times as long as in the other runs. The three planners ran interleaved under
+  the same conditions, so the comparison holds, but all their figures are lower than they would
+  be at full speed (a run of Klimax at 1 s at full speed proves 240 total-order problems, against
+  the 213 of the 1 s column). To be measured again.
+- Klimax answers "unsolvable" on 9 total-order problems of Minecraft-Player: the grounding proves
   that the initial tasks cannot be decomposed into reachable actions. No planner of the baseline
   solves them. They count as not solved in the tables.
 - It also answers "unsolvable" on problems 19 and 20 of Towers, and they are: both files lack

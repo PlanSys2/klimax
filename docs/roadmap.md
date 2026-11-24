@@ -32,8 +32,8 @@ in [baseline.md](baseline.md).
   total-order benchmark).
 - Domains where a planner of the baseline solves more: Woodworking, Hiking, Rover,
   Blocksworld-GTOHP, Monroe (partially observable).
-- An optimal search with an admissible heuristic, and the measure of the optimal track at
-  longer time limits.
+- An optimal search with an admissible heuristic. With partial order, a proof that does not
+  keep every node in memory: it is what stops Klimax in Colouring, Rover and Transport.
 
 ## Known limits
 

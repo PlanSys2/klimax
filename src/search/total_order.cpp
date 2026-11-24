@@ -305,10 +305,10 @@ public:
   Result run()
   {
     Result result;
-    if (!m_.total_order) {
-      result.message = "a task network is partially ordered";
-      return result;
-    }
+    // A partially ordered problem is searched with each task network in one of the orders it
+    // allows (as written, where the constraints leave it open). A plan found so is a plan of
+    // the problem; not finding one proves nothing, since another order might do.
+    linearized_ = !m_.total_order;
     if (!g_.axioms.empty() || !g_.numeric_fluents.empty() || !g_.object_fluents.empty() ||
       !g_.durative_actions.empty())
     {
@@ -1818,6 +1818,7 @@ private:
   std::vector<uint8_t> known_;                       // scratch of stack_feasible
   std::vector<uint32_t> touched_;
   uint64_t pruned_ = 0;
+  bool linearized_ = false;  // the problem is partially ordered: one order of each network
   std::unique_ptr<Relaxed> free_;     // any action anywhere: what it calls impossible, is
   std::unique_ptr<Relaxed> ordered_;  // effects only in the order of the methods: sharper
   Relaxed * relaxed_ = nullptr;       // the one in use; null: methods in their fixed order
@@ -1858,10 +1859,16 @@ Result total_order(const tdg::Problem & problem, kairos::Budget * budget)
 {
   if (problem.unsolvable) {
     Result result;
-    result.outcome = Outcome::Unsolvable;
+    result.outcome = Outcome::Unsolvable;  // whatever the order: nothing can be decomposed
     return result;
   }
-  return Search(problem, budget).run();
+  Result result = Search(problem, budget).run();
+  if (result.outcome == Outcome::Unsolvable && !problem.model.total_order) {
+    result.outcome = Outcome::Unsupported;
+    result.message = "no plan with the subtasks of each task network in the order tried; "
+      "interleaving them is not searched yet";
+  }
+  return result;
 }
 
 }  // namespace klimax::search

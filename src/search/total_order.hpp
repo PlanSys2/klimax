@@ -55,7 +55,9 @@ struct Result
  * exceed it. So the plan found is at most twice as long as needed by that measure, and a
  * recursion that does not progress is cut.
  *
- * Complete on a finite space. Every task network must be totally ordered.
+ * Complete on a finite space when every task network is totally ordered. A partially ordered
+ * network is searched in one of the orders it allows: a plan found is a plan, but none found
+ * proves nothing (Unsupported, with a message).
  */
 Result total_order(const tdg::Problem & problem, kairos::Budget * budget = nullptr);
 

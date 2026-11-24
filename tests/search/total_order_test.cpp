@@ -161,11 +161,18 @@ TEST(TotalOrderTest, Unsolvable)
     Outcome::Unsolvable);
 }
 
-TEST(TotalOrderTest, PartialOrderIsNotSupported)
+// A partial order is searched in one order it allows: the plan is valid for the problem
+TEST(TotalOrderTest, PartialOrderInOneOrder)
 {
   Solved s = solve(problem("(:htn :subtasks (and (bring cup a) (bring book d)))"));
-  EXPECT_EQ(s.result.outcome, Outcome::Unsupported);
-  EXPECT_FALSE(s.result.message.empty());
+  ASSERT_EQ(s.result.outcome, Outcome::Solved);
+  EXPECT_TRUE(s.verified) << s.why << "\n" << s.result.plan;
+  // With an order between them, also when it is not the one written
+  Solved o = solve(problem("(:htn :subtasks (and (t1 (bring cup a)) (t2 (bring book d)))"
+      " :ordering (< t2 t1))"));
+  ASSERT_EQ(o.result.outcome, Outcome::Solved);
+  EXPECT_TRUE(o.verified) << o.why;
+  EXPECT_LT(o.result.plan.find("drop r1 book d"), o.result.plan.find("drop r1 cup a"));
 }
 
 // Each way of searching alone finds a valid plan

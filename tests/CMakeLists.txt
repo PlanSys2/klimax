@@ -101,10 +101,10 @@ if(KLIMAX_BUILD_CLI)
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl --timeout 5)
   set_tests_properties(cli_solve_timeout PROPERTIES PASS_REGULAR_EXPRESSION "; solved")
-  # A partial order is not planned yet: exit 12 and a reason
-  add_test(NAME cli_solve_unsupported COMMAND klimax_cli
+  # A partially ordered problem, solved in one of the orders it allows
+  add_test(NAME cli_solve_partial_order COMMAND klimax_cli
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.hddl)
-  set_tests_properties(cli_solve_unsupported PROPERTIES
-    PASS_REGULAR_EXPRESSION "unsupported: a task network is partially ordered")
+  set_tests_properties(cli_solve_partial_order PROPERTIES
+    PASS_REGULAR_EXPRESSION "==>.*move kobuki bedroom hall.*<==")
 endif()

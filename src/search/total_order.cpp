@@ -45,6 +45,7 @@ struct Cell
   uint32_t next = kNone;
   uint64_t hash = 0;   // of the whole list from here
   uint64_t rest = 0;   // fewest actions the whole list from here can take
+  uint64_t reach = 0;  // which atoms of the goal (the first 64) the list from here may make true
 };
 
 struct Node
@@ -849,6 +850,202 @@ private:
         static_cast<unsigned long long>(evaluations));
     }
     method_needs_ = std::move(method_needs);
+
+    // What is sure after a task, whatever its decomposition: for an action, what it adds and
+    // deletes; for a method, what a step makes sure and no later step may undo; for an abstract
+    // task, what all its methods make sure. As literals: atom * 2 sure true, + 1 sure false.
+    std::vector<std::vector<uint32_t>> sure(nt);
+    std::vector<bool> sure_known(nt, false);
+    std::vector<std::vector<uint32_t>> method_sure(nm);
+    std::vector<bool> method_sure_known(nm, false);
+    for (size_t t = 0; t < nt && stack_walk_ > 0; ++t) {
+      if (p_.tasks[t].actions.empty()) {
+        continue;
+      }
+      // Common to every instance of the action
+      bool first = true;
+      for (uint32_t a : p_.tasks[t].actions) {
+        std::vector<uint32_t> mine;
+        for (ground::AtomId x : g_.actions[a].changes.add) {
+          mine.push_back(x * 2);
+        }
+        for (ground::AtomId x : g_.actions[a].changes.del) {
+          mine.push_back(x * 2 + 1);
+        }
+        // What a conditional effect may also change is not sure either way
+        for (const ground::Effect & e : g_.actions[a].effects) {
+          if (e.kind == ground::Effect::Kind::Add || e.kind == ground::Effect::Kind::Delete) {
+            mine.erase(std::remove_if(mine.begin(), mine.end(), [&](uint32_t l) {
+                  return l / 2 == e.atom;
+                }), mine.end());
+          }
+        }
+        std::sort(mine.begin(), mine.end());
+        if (first) {
+          sure[t] = std::move(mine);
+          first = false;
+        } else {
+          std::vector<uint32_t> both;
+          std::set_intersection(sure[t].begin(), sure[t].end(), mine.begin(), mine.end(),
+            std::back_inserter(both));
+          sure[t] = std::move(both);
+        }
+      }
+      sure_known[t] = true;
+    }
+    if (stack_walk_ > 0) {
+      std::vector<uint8_t> held(g_.atoms.size() * 2, 0);
+      std::vector<uint32_t> pending;
+      std::vector<bool> waiting(nm, true);
+      for (uint32_t m = static_cast<uint32_t>(nm); m-- > 0; ) {
+        pending.push_back(m);
+      }
+      while (!pending.empty()) {
+        if (out_of_budget()) {
+          return;
+        }
+        const uint32_t m = pending.back();
+        pending.pop_back();
+        waiting[m] = false;
+        const tdg::Method & method = p_.methods[m];
+        if (std::any_of(method.subtasks.begin(), method.subtasks.end(),
+          [&](uint32_t t) {return !sure_known[t];}))
+        {
+          continue;
+        }
+        const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
+          order_[method.method];
+        std::vector<uint32_t> now;  // literals sure so far, in `held`
+        for (uint32_t step : order) {
+          const uint32_t t = method.subtasks[step];
+          // It may add an atom: no longer sure false; may delete it: no longer sure true
+          for (uint32_t e : component_may[component[t]]) {
+            held[e ^ 1u] = 0;
+          }
+          for (uint32_t l : sure[t]) {
+            if (!held[l]) {
+              held[l] = 1;
+              now.push_back(l);
+            }
+          }
+        }
+        std::vector<uint32_t> mine;
+        for (uint32_t l : now) {
+          if (held[l]) {
+            mine.push_back(l);
+          }
+          held[l] = 0;
+        }
+        std::sort(mine.begin(), mine.end());
+        mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
+        if (method_sure_known[m] && mine == method_sure[m]) {
+          continue;
+        }
+        method_sure[m] = std::move(mine);
+        method_sure_known[m] = true;
+        const uint32_t parent = method.task;
+        if (parent == kNone) {
+          continue;
+        }
+        std::vector<uint32_t> common;
+        if (!sure_known[parent]) {
+          common = method_sure[m];
+        } else {
+          std::set_intersection(sure[parent].begin(), sure[parent].end(),
+            method_sure[m].begin(), method_sure[m].end(), std::back_inserter(common));
+        }
+        if (!sure_known[parent] || common.size() != sure[parent].size()) {
+          sure[parent] = std::move(common);
+          sure_known[parent] = true;
+          for (uint32_t user : used_in[parent]) {
+            if (!waiting[user]) {
+              waiting[user] = true;
+              pending.push_back(user);
+            }
+          }
+        }
+      }
+    }
+    // Which atoms of the goal each task may make true (the first 64 of them)
+    task_reach_.assign(nt, 0);
+    for (size_t i = 0; i < g_.goal.positive.size() && i < 64; ++i) {
+      const uint32_t wanted = g_.goal.positive[i] * 2;
+      for (size_t t = 0; t < nt; ++t) {
+        const std::vector<uint32_t> & changes = component_may[component[t]];
+        if (std::binary_search(changes.begin(), changes.end(), wanted)) {
+          task_reach_[t] |= uint64_t{1} << i;
+        }
+      }
+    }
+    task_needs_ = std::move(needs);
+    task_sure_ = std::move(sure);
+    task_may_ = std::move(component_may);
+    task_component_ = std::move(component);
+    known_.assign(g_.atoms.size(), 0);
+  }
+
+  // Looks down the stack from `top` with what is known of the state: before each task, what it
+  // needs must not be surely false; after it, what it may change is unknown and what it makes
+  // sure is known. False when some task further down can no longer be executed, whatever
+  // happens in between. Works on the stack of cells given.
+  bool stack_feasible(const std::vector<Cell> & cells, uint32_t top)
+  {
+    if (task_needs_.empty() || std::getenv("KLIMAX_NO_STACK_CHECK") != nullptr) {
+      return true;
+    }
+    // What is missing of the goal must be something a task still in the stack may make true:
+    // once the last one that could is done, it is too late
+    const uint64_t reach = top == kNone ? 0 : cells[top].reach;
+    for (size_t i = 0; i < g_.goal.positive.size() && i < 64; ++i) {
+      if (!state_[g_.goal.positive[i]] && ((reach >> i) & 1u) == 0) {
+        return false;
+      }
+    }
+    if (stack_walk_ == 0) {
+      return true;
+    }
+    // known_[atom]: 0 as in the state, 1 unknown, 2 surely true, 3 surely false
+    touched_.clear();
+    bool feasible = true;
+    size_t work = 0;
+    for (uint32_t c = top; c != kNone && feasible && work < stack_walk_; c = cells[c].next) {
+      const uint32_t t = cells[c].task;
+      for (uint32_t l : task_needs_[t]) {
+        const uint32_t a = l / 2;
+        const bool wanted = (l & 1u) == 0;
+        const uint8_t k = known_[a];
+        const bool surely_other = k == 0 ? state_[a] != wanted : k == (wanted ? 3 : 2);
+        if (surely_other) {
+          feasible = false;
+          break;
+        }
+      }
+      const std::vector<uint32_t> & may = task_may_[task_component_[t]];
+      work += task_needs_[t].size() + may.size() + task_sure_[t].size();
+      for (uint32_t e : may) {
+        const uint32_t a = e / 2;
+        const bool adds = (e & 1u) == 0;
+        const uint8_t k = known_[a];
+        const bool value = k == 0 ? state_[a] : k == 2;
+        if (k != 1 && value != adds) {
+          if (k == 0) {
+            touched_.push_back(a);
+          }
+          known_[a] = 1;
+        }
+      }
+      for (uint32_t l : task_sure_[t]) {
+        const uint32_t a = l / 2;
+        if (known_[a] == 0) {
+          touched_.push_back(a);
+        }
+        known_[a] = (l & 1u) == 0 ? 2 : 3;
+      }
+    }
+    for (uint32_t a : touched_) {
+      known_[a] = 0;
+    }
+    return feasible;
   }
 
   bool needs_hold(uint32_t method) const
@@ -1011,6 +1208,8 @@ private:
       made.next = top;
       made.hash = mix((top == kNone ? 0x9e3779b97f4a7c15ull : bf_->cells[top].hash) ^
           (uint64_t{made.task} + 0x632be59bd9b4e019ull));
+      made.reach = (task_reach_.empty() ? ~uint64_t{0} : task_reach_[made.task]) |
+        (top == kNone ? 0 : bf_->cells[top].reach);
       top = first + static_cast<uint32_t>(k);
     }
     return top;
@@ -1142,6 +1341,10 @@ private:
       child.did_method = m;
       child.state = bf_->nodes[node].state;
       child.top = bf_push(method, below, child.first_child, child.child_count);
+      if (!stack_feasible(bf_->cells, child.top)) {
+        bf_->cells.resize(child.first_child);
+        continue;  // something further down the stack can no longer be executed
+      }
       bf_->nodes.push_back(child);
       // Lowest cost first
       h = std::min<uint64_t>(h, 0xffffffffull);
@@ -1463,8 +1666,16 @@ private:
             (uint64_t{cell.task} + 0x632be59bd9b4e019ull));
         cell.rest = std::min(kInfinite, task_cost_[cell.task] +
             (top == kNone ? 0 : cells_[top].rest));
+        cell.reach = (task_reach_.empty() ? ~uint64_t{0} : task_reach_[cell.task]) |
+          (top == kNone ? 0 : cells_[top].reach);
         cells_.push_back(cell);
         top = static_cast<uint32_t>(cells_.size() - 1);
+      }
+      if (!stack_feasible(cells_, top)) {
+        ++pruned_;
+        cells_.resize(choice.cells);
+        nodes_.resize(choice.nodes);
+        continue;  // something further down the stack can no longer be executed
       }
       const uint64_t done = executed_.size();
       const bool too_long = done + (top == kNone ? 0 : cells_[top].rest) > bound_;
@@ -1593,6 +1804,19 @@ private:
   std::vector<std::vector<uint32_t>> methods_;  // of each task, cheapest first
   std::vector<uint32_t> initial_;
   std::vector<std::vector<uint32_t>> method_needs_;  // by ground method; empty: not inferred
+  std::vector<std::vector<uint32_t>> task_needs_;    // by ground task
+  std::vector<std::vector<uint32_t>> task_sure_;     // literals sure after the task
+  std::vector<std::vector<uint32_t>> task_may_;      // by component: what it may change
+  std::vector<uint32_t> task_component_;
+  std::vector<uint64_t> task_reach_;                 // goal atoms each task may make true
+  // How far stack_feasible looks down the stack with what is sure after each task, in entries
+  // of the tables it reads (KLIMAX_STACK_WALK). Off: measured on the total-order benchmark of
+  // IPC 2023 at 1 s, it costs time and prunes nothing the other checks do not (436 solved
+  // without it, 415 looking 20000 entries ahead)
+  size_t stack_walk_ = std::getenv("KLIMAX_STACK_WALK") != nullptr ?
+    std::strtoul(std::getenv("KLIMAX_STACK_WALK"), nullptr, 10) : 0;
+  std::vector<uint8_t> known_;                       // scratch of stack_feasible
+  std::vector<uint32_t> touched_;
   uint64_t pruned_ = 0;
   std::unique_ptr<Relaxed> free_;     // any action anywhere: what it calls impossible, is
   std::unique_ptr<Relaxed> ordered_;  // effects only in the order of the methods: sharper

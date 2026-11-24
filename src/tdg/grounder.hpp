@@ -55,7 +55,7 @@ struct Method
 struct Stats
 {
   size_t kairos_actions = 0;   // action instances reachable ignoring the hierarchy
-  size_t tasks_built = 0;      // before pruning
+  size_t tasks_built = 0;      // derivable, before keeping what the initial network reaches
   size_t methods_built = 0;
   double milliseconds = 0.0;
 };
@@ -80,10 +80,12 @@ struct Problem
  *
  * - Kairos grounds the actions and the method preconditions (as actions with no effect) by
  *   relaxed reachability, ignoring the hierarchy: a superset of what any plan can use.
- * - From the initial task network down, every method of every task reached is instantiated by
- *   joining the instances of its precondition and of its primitive subtasks.
- * - A method with a subtask that cannot be decomposed into actions is dropped, and so on up;
- *   what is then not reachable from the initial network is dropped too.
+ * - Top-down, which tasks the initial network can ask for, with the arguments known at that
+ *   point; and only for those:
+ * - Bottom-up, in Datalog (Kairos' engine): a method instance is derivable when its
+ *   precondition is reachable and its subtasks are derivable; an abstract task, when some method
+ *   of it is. So every instance kept can be decomposed into reachable actions.
+ * - From the initial task network down, only what it reaches through derivable instances is kept.
  *
  * Error "ground.budget" when the budget runs out.
  */

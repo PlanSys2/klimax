@@ -213,6 +213,22 @@ Detalle de H1:
 - ✅ `klimax --check` en el ejecutable.
 - ✅ `klimax --verify` en el ejecutable.
 
+Detalle de H2:
+
+- ✅ Primer motor de orden total: progresión en profundidad sobre el problema instanciado, con los
+  métodos en el orden escrito y detección de estado y pila repetidos. `klimax DOMINIO PROBLEMA`
+  escribe el plan y su descomposición en el formato del IPC, sin las tareas que añade la
+  separación de parámetros.
+- 🔄 Medida en el banco de orden total. Una muestra de 166 de los 761 problemas a 1 s: 77
+  resueltos y verificados, 87 sin terminar y 2 planes rechazados por el verificador (Logistics,
+  por examinar). No es todavía comparable con la línea base: falta la pasada completa.
+- ⏳ Planes demasiado largos: sin guía, la búsqueda da rodeos (hasta 30 000 acciones, ficheros de
+  20 MB que el verificador del IPC tarda minutos en comprobar). Hace falta cortar la recursión
+  que no avanza y preferir los métodos que terminan.
+- ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
+- ⏳ Heurística y búsqueda informada (enlaza con H4).
+- ⏳ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761).
+
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 
 Actividad de los proyectos (noviembre de 2026): el código público de PANDA, Lilotane y PDDL4J

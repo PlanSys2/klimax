@@ -15,6 +15,7 @@
 #include "search/total_order.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <functional>
 #include <iterator>
@@ -46,6 +47,7 @@ struct Cell
   uint64_t hash = 0;   // of the whole list from here
   uint64_t rest = 0;   // fewest actions the whole list from here can take
   uint64_t reach = 0;  // which atoms of the goal (the first 64) the list from here may make true
+  uint32_t mask = kNone;  // the atoms the list from here may read (Search::mask_for)
 };
 
 struct Node
@@ -188,6 +190,9 @@ public:
       }
     }
     cost_.resize(props);
+    support_.resize(props);
+    in_plan_.assign(props, 0);
+    op_in_plan_.assign(base_.size(), 0);
     value_.resize(base_.size());
     waiting_.resize(base_.size());
   }
@@ -195,6 +200,7 @@ public:
   void evaluate(const std::vector<bool> & state)
   {
     std::fill(cost_.begin(), cost_.end(), kUnreached);
+    plan_undo(0);
     heap_.clear();
     for (uint32_t op = 0; op < base_.size(); ++op) {
       waiting_[op] = pre_start_[op + 1] - pre_start_[op];
@@ -221,7 +227,8 @@ public:
       }
       for (uint32_t i = user_start_[x]; i < user_start_[x + 1]; ++i) {
         const uint32_t op = users_[i];
-        value_[op] = std::min(kUnreached, value_[op] + cost);
+        // A cost too large to hold is still a cost: only what is never reached is kUnreached
+        value_[op] = std::min(kUnreached - 1, value_[op] + cost);
         if (--waiting_[op] == 0) {
           fire(op);
         }
@@ -250,6 +257,28 @@ public:
   size_t operators() const {return base_.size();}
   bool ordered() const {return ordered_;}
 
+  // A relaxed plan from the state evaluated, built up task by task and atom by atom: each call
+  // adds what its argument needs through the cheapest way found, and returns how many actions
+  // that added to the plan. An action that several of them need is counted once, which the sum
+  // of their costs does not do. `plan_size()` and `plan_undo()` take the plan back to an
+  // earlier point.
+  uint32_t plan_task(uint32_t t) {return plan_add(atoms_ + t);}
+  uint32_t plan_atom(uint32_t a) {return plan_add(a);}
+  size_t plan_size() const {return plan_.size();}
+
+  void plan_undo(size_t size)
+  {
+    while (plan_.size() > size) {
+      const uint32_t entry = plan_.back();
+      plan_.pop_back();
+      if ((entry & 1u) != 0) {
+        op_in_plan_[entry / 2] = 0;
+      } else {
+        in_plan_[entry / 2] = 0;
+      }
+    }
+  }
+
 private:
   uint32_t far(uint32_t cost) const
   {
@@ -267,6 +296,30 @@ private:
     }
   }
 
+  uint32_t plan_add(uint32_t goal)
+  {
+    uint32_t actions = 0;
+    todo_.assign(1, goal);
+    while (!todo_.empty()) {
+      const uint32_t x = todo_.back();
+      todo_.pop_back();
+      if (cost_[x] == 0 || cost_[x] == kUnreached || in_plan_[x]) {
+        continue;  // true already (or impossible: the caller has seen that)
+      }
+      in_plan_[x] = 1;
+      plan_.push_back(x * 2);
+      const uint32_t op = support_[x];
+      if (op_in_plan_[op]) {
+        continue;
+      }
+      op_in_plan_[op] = 1;
+      plan_.push_back(op * 2 + 1);
+      actions += base_[op];
+      todo_.insert(todo_.end(), pre_.begin() + pre_start_[op], pre_.begin() + pre_start_[op + 1]);
+    }
+    return actions;
+  }
+
   void fire(uint32_t op)
   {
     const uint32_t cost = value_[op];
@@ -274,6 +327,7 @@ private:
       const uint32_t x = eff_[i];
       if (cost < cost_[x]) {
         cost_[x] = cost;
+        support_[x] = op;
         heap_.emplace_back(cost, x);
         std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
       }
@@ -291,6 +345,11 @@ private:
   std::vector<uint32_t> user_start_;
   std::vector<uint32_t> users_;
   std::vector<uint32_t> cost_;       // by proposition
+  std::vector<uint32_t> support_;    // by proposition: the operator that gave it its cost
+  std::vector<uint8_t> in_plan_;     // by proposition and by operator: in the relaxed plan
+  std::vector<uint8_t> op_in_plan_;
+  std::vector<uint32_t> plan_;       // what was added, to undo: proposition * 2, operator * 2 + 1
+  std::vector<uint32_t> todo_;
   std::vector<uint32_t> value_;      // by operator: its cost so far
   std::vector<uint32_t> waiting_;    // by operator: preconditions not reached yet
   std::vector<std::pair<uint32_t, uint32_t>> heap_;
@@ -514,12 +573,7 @@ private:
   {
     bound_ = bound;
     cut_ = false;
-    state_.assign(g_.atoms.size(), false);
-    state_hash_ = 0;
-    for (ground::AtomId a : g_.init_atoms) {
-      state_[a] = true;
-      state_hash_ ^= zobrist_[a];
-    }
+    initial_state();
     trail_.clear();
     cells_.clear();
     executed_.clear();
@@ -703,6 +757,11 @@ private:
     }
     std::vector<uint32_t> component(nt, kNone);
     std::vector<std::vector<uint32_t>> component_may;
+    // The atoms each component may read: in a precondition of an action or of a method, or in
+    // the condition of an effect, through any decomposition
+    std::vector<std::vector<uint32_t>> component_reads;
+    std::vector<uint8_t> read(g_.atoms.size(), 0);
+    size_t total_reads = 0;
     {
       std::vector<uint32_t> index(nt, kNone);
       std::vector<uint32_t> low(nt, 0);
@@ -776,6 +835,41 @@ private:
           std::sort(all.begin(), all.end());
           total += all.size();
           component_may.push_back(std::move(all));
+          std::vector<uint32_t> reads;
+          auto reads_atom = [&](ground::AtomId x) {
+              if (!read[x]) {
+                read[x] = 1;
+                reads.push_back(x);
+              }
+            };
+          auto reads_condition = [&](const ground::Condition & c) {
+              std::for_each(c.positive.begin(), c.positive.end(), reads_atom);
+              std::for_each(c.negative.begin(), c.negative.end(), reads_atom);
+            };
+          for (uint32_t member : members) {
+            for (uint32_t a : p_.tasks[member].actions) {
+              reads_condition(g_.actions[a].precondition);
+              for (const ground::Effect & e : g_.actions[a].effects) {
+                reads_condition(e.condition);
+              }
+            }
+            for (uint32_t m : p_.tasks[member].methods) {
+              for (uint32_t a : p_.methods[m].precondition) {
+                reads_condition(g_.actions[a].precondition);
+              }
+            }
+            for (uint32_t c : children[member]) {
+              if (component[c] != id) {
+                std::for_each(component_reads[component[c]].begin(),
+                  component_reads[component[c]].end(), reads_atom);
+              }
+            }
+          }
+          for (uint32_t x : reads) {
+            read[x] = 0;
+          }
+          total_reads += reads.size();
+          component_reads.push_back(std::move(reads));
           if (total > 50000000 || out_of_budget()) {
             return;
           }
@@ -1023,6 +1117,19 @@ private:
     task_sure_ = std::move(sure);
     task_may_ = std::move(component_may);
     task_component_ = std::move(component);
+    // The atoms of the goal matter to every stack: mask 0
+    words_ = (g_.atoms.size() + 63) / 64;
+    if (total_reads <= 50000000 && g_.atoms.size() <= (size_t{1} << 17) &&
+      std::getenv("KLIMAX_NO_RELEVANCE") == nullptr)
+    {
+      component_reads_ = std::move(component_reads);
+      masks_.assign(words_, 0);
+      auto mark = [&](ground::AtomId a) {masks_[a / 64] |= uint64_t{1} << (a % 64);};
+      std::for_each(g_.goal.positive.begin(), g_.goal.positive.end(), mark);
+      std::for_each(g_.goal.negative.begin(), g_.goal.negative.end(), mark);
+      mask_all_.assign(1, false);
+      relevance_ = true;
+    }
     known_.assign(g_.atoms.size(), 0);
   }
 
@@ -1103,6 +1210,90 @@ private:
     return true;
   }
 
+  // The mask of a stack with `task` on top of one with mask `below`: the atoms some task in it
+  // may read, and those of the goal. kNone: no mask, every atom counts.
+  uint32_t mask_for(uint32_t task, uint32_t below)
+  {
+    if (!relevance_ || below == kNone) {
+      return kNone;
+    }
+    const uint64_t key = (uint64_t{task_component_[task]} << 32) | below;
+    if (const auto it = mask_of_.find(key); it != mask_of_.end()) {
+      return it->second;
+    }
+    scratch_.assign(masks_.begin() + static_cast<std::ptrdiff_t>(below * words_),
+      masks_.begin() + static_cast<std::ptrdiff_t>((below + 1) * words_));
+    bool grew = false;
+    for (uint32_t a : component_reads_[task_component_[task]]) {
+      const uint64_t bit = uint64_t{1} << (a % 64);
+      grew = grew || (scratch_[a / 64] & bit) == 0;
+      scratch_[a / 64] |= bit;
+    }
+    uint32_t id = below;
+    if (grew) {
+      uint64_t content = 0;
+      size_t count = 0;
+      for (uint64_t w : scratch_) {
+        content = mix(content ^ w);
+        count += static_cast<size_t>(std::popcount(w));
+      }
+      // The same set reached another way is the same mask
+      const auto [first, last] = mask_by_content_.equal_range(content);
+      id = kNone;
+      for (auto it = first; it != last; ++it) {
+        if (std::equal(scratch_.begin(), scratch_.end(),
+          masks_.begin() + static_cast<std::ptrdiff_t>(it->second * words_)))
+        {
+          id = it->second;
+        }
+      }
+      if (id == kNone && masks_.size() * sizeof(uint64_t) < kMaskMemory) {
+        id = static_cast<uint32_t>(mask_all_.size());
+        masks_.insert(masks_.end(), scratch_.begin(), scratch_.end());
+        mask_all_.push_back(count == g_.atoms.size());
+        mask_by_content_.emplace(content, id);
+      }
+    }
+    if (mask_of_.size() < 4000000) {
+      mask_of_.emplace(key, id);
+    }
+    return id;
+  }
+
+  // Of the state as far as `mask` goes: two states that differ only in atoms that nothing left
+  // to do reads, and the goal does not mention, have the same future
+  uint64_t relevant_hash(uint32_t mask) const
+  {
+    if (mask == kNone || mask_all_[mask]) {
+      return state_hash_;
+    }
+    const uint64_t * m = &masks_[size_t{mask} * words_];
+    uint64_t h = 0x243f6a8885a308d3ull;
+    for (size_t i = 0; i < words_; ++i) {
+      h = (h ^ (bits_[i] & m[i])) * 0x9e3779b97f4a7c15ull;
+      h ^= h >> 29;
+    }
+    return h;
+  }
+
+  void flip(ground::AtomId a)
+  {
+    state_[a] = !state_[a];
+    bits_[a / 64] ^= uint64_t{1} << (a % 64);
+  }
+
+  void initial_state()
+  {
+    state_.assign(g_.atoms.size(), false);
+    bits_.assign((g_.atoms.size() + 63) / 64, 0);
+    state_hash_ = 0;
+    for (ground::AtomId a : g_.init_atoms) {
+      state_[a] = true;
+      bits_[a / 64] |= uint64_t{1} << (a % 64);
+      state_hash_ ^= zobrist_[a];
+    }
+  }
+
   // The steps of each network in the order to execute them
   void orders()
   {
@@ -1155,6 +1346,7 @@ private:
   {
     if (state_[a] != value) {
       state_[a] = value;
+      bits_[a / 64] ^= uint64_t{1} << (a % 64);
       state_hash_ ^= zobrist_[a];
       trail_.push_back(a);
     }
@@ -1252,6 +1444,7 @@ private:
           (uint64_t{made.task} + 0x632be59bd9b4e019ull));
       made.reach = (task_reach_.empty() ? ~uint64_t{0} : task_reach_[made.task]) |
         (top == kNone ? 0 : bf_->cells[top].reach);
+      made.mask = mask_for(made.task, top == kNone ? 0 : bf_->cells[top].mask);
       top = first + static_cast<uint32_t>(k);
     }
     return top;
@@ -1295,6 +1488,7 @@ private:
     for (size_t a = 0; a < state_.size(); ++a) {
       state_[a] = (bf_->states[at + a / 64] >> (a % 64)) & 1u;
     }
+    std::copy_n(bf_->states.begin() + static_cast<std::ptrdiff_t>(at), words, bits_.begin());
     state_hash_ = bf_->hashes[index];
   }
 
@@ -1350,7 +1544,31 @@ private:
         }
       }
       uint64_t h = 0;
-      if (possible) {
+      if (possible && plan_costs_[relaxed_->ordered() ? 1 : 0]) {
+        // The actions of one relaxed plan for everything left: the subtasks, the stack and
+        // the goal. What several of them need is counted once.
+        bf_evaluate();
+        const size_t start = relaxed_->plan_size();
+        auto task = [&](uint32_t t) {
+            const uint32_t c = relaxed_->task(t);
+            possible = possible && c != Relaxed::kUnreached;
+            h += c >= Relaxed::kFar ? c : relaxed_->plan_task(t);
+          };
+        for (size_t k = done; k < order.size() && possible; ++k) {
+          task(method.subtasks[order[k]]);
+        }
+        uint32_t c = below;
+        for (int depth = 0; c != kNone && depth < 64 && possible; ++depth) {
+          task(bf_->cells[c].task);
+          c = bf_->cells[c].next;
+        }
+        for (size_t i = 0; i < g_.goal.positive.size() && possible; ++i) {
+          const uint32_t cost = relaxed_->atom(g_.goal.positive[i]);
+          possible = cost != Relaxed::kUnreached;
+          h += cost >= Relaxed::kFar ? cost : relaxed_->plan_atom(g_.goal.positive[i]);
+        }
+        relaxed_->plan_undo(start);
+      } else if (possible) {
         bf_evaluate();
         for (size_t k = done; k < order.size() && possible; ++k) {
           const uint32_t c = relaxed_->task(method.subtasks[order[k]]);
@@ -1371,7 +1589,7 @@ private:
       while (trail_.size() > mark) {
         const ground::AtomId a = trail_.back();
         trail_.pop_back();
-        state_[a] = !state_[a];
+        flip(a);
       }
       state_hash_ = hash;
       if (!possible) {
@@ -1399,12 +1617,7 @@ private:
   Outcome best_first(Result & result)
   {
     if (bf_->nodes.empty()) {
-      state_.assign(g_.atoms.size(), false);
-      state_hash_ = 0;
-      for (ground::AtomId a : g_.init_atoms) {
-        state_[a] = true;
-        state_hash_ ^= zobrist_[a];
-      }
+      initial_state();
       bf_store();
       bf_->nodes.push_back(BfNode{});
       evaluated_ = false;
@@ -1467,7 +1680,9 @@ private:
         if (dead || top == kNone) {
           break;
         }
-        if (!bf_->seen.insert(mix(state_hash_ ^ bf_->cells[top].hash)).second) {
+        if (!bf_->seen.insert(mix(relevant_hash(bf_->cells[top].mask) ^
+          bf_->cells[top].hash)).second)
+        {
           dead = true;
           break;
         }
@@ -1668,12 +1883,7 @@ private:
   {
     relaxed_ = free_.get();
     if (po_nodes_.empty()) {
-      state_.assign(g_.atoms.size(), false);
-      state_hash_ = 0;
-      for (ground::AtomId a : g_.init_atoms) {
-        state_[a] = true;
-        state_hash_ ^= zobrist_[a];
-      }
+      initial_state();
       po_states_.clear();
       po_hashes_.clear();
       po_store();
@@ -1771,7 +1981,7 @@ private:
           while (trail_.size() > mark) {
             const ground::AtomId a = trail_.back();
             trail_.pop_back();
-            state_[a] = !state_[a];
+            flip(a);
           }
           state_hash_ = hash;
           po_push(child, without);
@@ -1823,6 +2033,7 @@ private:
     for (size_t a = 0; a < state_.size(); ++a) {
       state_[a] = (po_states_[at + a / 64] >> (a % 64)) & 1u;
     }
+    std::copy_n(po_states_.begin() + static_cast<std::ptrdiff_t>(at), words, bits_.begin());
     state_hash_ = po_hashes_[index];
   }
 
@@ -1972,7 +2183,7 @@ private:
       while (trail_.size() > mark) {
         const ground::AtomId a = trail_.back();
         trail_.pop_back();
-        state_[a] = !state_[a];
+        flip(a);
       }
       state_hash_ = hash;
       if (possible) {
@@ -2031,6 +2242,7 @@ private:
             (top == kNone ? 0 : cells_[top].rest));
         cell.reach = (task_reach_.empty() ? ~uint64_t{0} : task_reach_[cell.task]) |
           (top == kNone ? 0 : cells_[top].reach);
+        cell.mask = mask_for(cell.task, top == kNone ? 0 : cells_[top].mask);
         cells_.push_back(cell);
         top = static_cast<uint32_t>(cells_.size() - 1);
       }
@@ -2044,7 +2256,8 @@ private:
       const bool too_long = done + (top == kNone ? 0 : cells_[top].rest) > bound_;
       cut_ = cut_ || too_long;
       // Seen with as few actions done: nothing new from here
-      const uint64_t key = mix(state_hash_ ^ (top == kNone ? 0x51ull : cells_[top].hash));
+      const uint64_t key = top == kNone ? mix(relevant_hash(relevance_ ? 0 : kNone) ^ 0x51ull) :
+        mix(relevant_hash(cells_[top].mask) ^ cells_[top].hash);
       bool repeated = false;
       if (!too_long && seen_.size() >= 40000000) {
         // Out of room to remember more: search on without (slower, still correct)
@@ -2083,7 +2296,7 @@ private:
       while (trail_.size() > choice.trail) {
         const ground::AtomId a = trail_.back();
         trail_.pop_back();
-        state_[a] = !state_[a];
+        flip(a);
       }
       state_hash_ = choice.state_hash;
       cells_.resize(choice.cells);
@@ -2176,6 +2389,24 @@ private:
   std::vector<std::vector<uint32_t>> task_may_;      // by component: what it may change
   std::vector<uint32_t> task_component_;
   std::vector<uint64_t> task_reach_;                 // goal atoms each task may make true
+  // Relevance: which atoms a stack may still read (see mask_for)
+  static constexpr size_t kMaskMemory = size_t{1} << 28;
+  bool relevance_ = false;
+  // Best first values what is left by the size of a relaxed plan, not by the sum of the costs
+  // with the ordered relaxation; the free one keeps the sum. Measured at 1 s on the total-order
+  // benchmark of IPC 2023: 440 solved so, 429 with plans in both, 423 with them only in the free
+  // one, 421 with sums in both (KLIMAX_PLAN_COSTS=ab: a for the free one, b for the ordered)
+  bool plan_costs_[2] = {
+    std::getenv("KLIMAX_PLAN_COSTS") != nullptr && std::getenv("KLIMAX_PLAN_COSTS")[0] == '1',
+    std::getenv("KLIMAX_PLAN_COSTS") == nullptr || std::getenv("KLIMAX_PLAN_COSTS")[1] == '1'};
+  size_t words_ = 0;                                 // of a state as bits
+  std::vector<uint64_t> bits_;                       // the state, as state_
+  std::vector<std::vector<uint32_t>> component_reads_;
+  std::vector<uint64_t> masks_;                      // words_ each
+  std::vector<bool> mask_all_;                       // the mask has every atom
+  std::unordered_map<uint64_t, uint32_t> mask_of_;   // (component, mask below) -> mask
+  std::unordered_multimap<uint64_t, uint32_t> mask_by_content_;
+  std::vector<uint64_t> scratch_;
   // How far stack_feasible looks down the stack with what is sure after each task, in entries
   // of the tables it reads (KLIMAX_STACK_WALK). Off: measured on the total-order benchmark of
   // IPC 2023 at 1 s, it costs time and prunes nothing the other checks do not (436 solved

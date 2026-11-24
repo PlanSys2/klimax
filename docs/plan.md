@@ -238,7 +238,7 @@ Detalle de H2:
   | Klimax, con primero-el-mejor en los turnos | 201 | 310 | por medir |
   | Klimax, con el objetivo en la estimación | 219 | 369 | 475 |
   | Klimax, desempate por antigüedad | 232 | 398 | 493 |
-  | Klimax, con relajación ordenada por turnos | 247 | 420 | por medir |
+  | **Klimax, con relajación ordenada por turnos** | **247** | **421** | **509** |
   | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
   | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
   | HyperTensioN | 52 | 298 | 332 |
@@ -261,7 +261,9 @@ Detalle de H2:
   sin precondición daban cualquier tarea por hecha con coste 2). No sirve de prueba de
   imposibilidad, así que solo ordena. Dos búsquedas primero-el-mejor, una con cada relajación,
   se turnan con las dos en profundidad.
-- ⏳ Logistics a 30 s con la relajación ordenada, y Woodworking, Hiking y Robot.
+- ⏳ Dominios donde PandaDealer sigue por delante a 30 s: Logistics (48 frente a 74), Woodworking
+  (9 frente a 20), Blocksworld-GTOHP (19 frente a 27; con una sola relajación eran 27), Robot
+  (14 frente a 20) y Hiking (17 frente a 22).
 - ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
 - ✅ Búsqueda primero-el-mejor con la heurística, como tercer modo de los turnos: a 1 s gana a
   PandaDealer en 12 dominios, empata en 1 y pierde en 10.
@@ -272,7 +274,8 @@ Detalle de H2:
   de 192 problemas frente a otras tres variantes): AssemblyHierarchical pasa de 12 a 28 a 1 s.
 - ⏳ Logistics (30 de 80 a 30 s; PandaDealer, 74): las alternativas de «pasar por un sitio
   intermedio» empatan en la estimación, que valora cada subtarea desde el mismo estado.
-- ⏳ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761).
+- ✅ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761). Klimax:
+  421 y 509. Por dominios a 30 s gana en 10, empata en 3 y pierde en 10.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

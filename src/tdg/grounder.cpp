@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <span>
@@ -76,12 +78,38 @@ public:
     }
     p_.pddl = std::move(grounded).value();
     p_.stats.kairos_actions = p_.pddl.actions.size();
+    auto since = [&]() {
+        return std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - start).count();
+      };
+    p_.stats.kairos_ms = since();
+    if (trace_) {
+      std::fprintf(stderr, "kairos: %zu actions, %zu atoms, %.0f ms\n", p_.pddl.actions.size(),
+        p_.pddl.atoms.size(), p_.stats.kairos_ms);
+    }
     try {
       program();
-      if (!prog_.solve(budget_)) {
+      const bool solved = prog_.solve(budget_);
+      p_.stats.datalog_ms = since() - p_.stats.kairos_ms;
+      if (trace_) {
+        std::fprintf(stderr, "datalog: %zu facts, %zu rules, %zu probes, %.0f ms%s\n",
+          prog_.stats().facts, prog_.stats().rules, prog_.stats().join_probes,
+          p_.stats.datalog_ms, solved ? "" : " (out of budget)");
+        for (uint32_t i = 0; i < m_.methods.size(); ++i) {
+          if (prog_.facts(method_predicate_[i]).size() > 20000) {
+            std::fprintf(stderr, "  %s: %zu instances\n", m_.methods[i].name.c_str(),
+              prog_.facts(method_predicate_[i]).size());
+          }
+        }
+      }
+      if (!solved) {
         throw OutOfBudget{};
       }
       collect();
+      if (trace_) {
+        std::fprintf(stderr, "collect: %zu tasks, %zu methods, %.0f ms\n", p_.tasks.size(),
+          p_.methods.size(), since() - p_.stats.kairos_ms - p_.stats.datalog_ms);
+      }
     } catch (const OutOfBudget &) {
       return kairos::Result<Problem>::failure(
         {kairos::Diagnostic::error("ground.budget", "the task is too large to ground in the "
@@ -509,6 +537,7 @@ private:
 
   const Model & m_;
   kairos::Budget * budget_;
+  bool trace_ = std::getenv("KLIMAX_TRACE_GROUND") != nullptr;  // sizes and times to stderr
   Problem p_;
   datalog::Program prog_;
   std::vector<std::unordered_map<Row, std::vector<uint32_t>, RowHash>> instances_;  // by schema

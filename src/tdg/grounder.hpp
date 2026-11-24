@@ -58,6 +58,8 @@ struct Stats
   size_t tasks_built = 0;      // derivable, before keeping what the initial network reaches
   size_t methods_built = 0;
   double milliseconds = 0.0;
+  double kairos_ms = 0.0;    // of them, Kairos' grounding of the actions
+  double datalog_ms = 0.0;   // the Datalog program of the hierarchy
 };
 
 /**

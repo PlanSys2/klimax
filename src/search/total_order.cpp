@@ -2011,12 +2011,10 @@ private:
         }
       } else {
         // Under a bound on the length, the same again only counts with fewer actions done
+        // (po_keep() noted it when it was made: only fewer since then discard it)
         const auto [seen, fresh] = po_fewest_.emplace(po_key(node), node.actions);
-        if (!fresh) {
-          if (seen->second <= node.actions) {
-            continue;
-          }
-          seen->second = node.actions;
+        if (!fresh && seen->second < node.actions) {
+          continue;
         }
         uint64_t least = node.actions;
         for (uint32_t i = 0; i < node.item_count; ++i) {
@@ -2070,15 +2068,20 @@ private:
           const size_t mark = trail_.size();
           const uint64_t hash = state_hash_;
           apply(*action);
-          child.state = static_cast<uint32_t>(po_hashes_.size());
-          po_store();
+          const bool keep = po_keep(child);
+          if (keep) {
+            child.state = static_cast<uint32_t>(po_hashes_.size());
+            po_store();
+          }
           while (trail_.size() > mark) {
             const ground::AtomId a = trail_.back();
             trail_.pop_back();
             flip(a);
           }
           state_hash_ = hash;
-          po_push(child, without);
+          if (keep) {
+            po_push(child, without);
+          }
           continue;
         }
         for (uint32_t m : methods_[item.task]) {
@@ -2101,11 +2104,41 @@ private:
           child.method = m;
           child.actions = node.actions;
           po_replace(node, i, &method, child);
-          po_push(child, without + cost);
+          if (po_keep(child)) {
+            po_push(child, without + cost);
+          }
         }
       }
     }
     return Outcome::Unsolvable;
+  }
+
+  // Under a bound on the length: false, and its network forgotten, for a node that cannot be
+  // within it or that is one already made with no more actions. Call it in the node's state
+  bool po_keep(const PoNode & child)
+  {
+    if (po_bound_ == kInfinite) {
+      return true;
+    }
+    uint64_t least = child.actions;
+    for (uint32_t i = 0; i < child.item_count; ++i) {
+      least += task_cost_[po_items_[child.items + i].task];
+    }
+    bool keep = least <= po_bound_;
+    if (keep && child.item_count != 0) {
+      const auto [seen, fresh] = po_fewest_.emplace(po_key(child), child.actions);
+      if (!fresh) {
+        keep = child.actions < seen->second;
+        if (keep) {
+          seen->second = child.actions;
+        }
+      }
+    }
+    if (!keep) {
+      po_items_.resize(child.items);
+      po_edges_.resize(child.edges);
+    }
+    return keep;
   }
 
   void po_store()

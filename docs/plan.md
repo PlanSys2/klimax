@@ -327,18 +327,41 @@ casi hecha):
 Detalle de H3b:
 
 - ✅ Entorno de trabajo con unified-planning 1.3 y nanobind (`.klimax/venv`, fuera de los
-  repositorios). unified-planning ya escribe HDDL desde sus problemas jerárquicos y tiene un plan
-  jerárquico (`HierarchicalPlan`) en el que devolver el resultado.
-- 🔄 El plan con estructura en la interfaz pública (`SolveOptions::decomposition`): de cada
+  repositorios).
+- ✅ El plan con estructura en la interfaz pública (`SolveOptions::decomposition`): de cada
   paso, qué subtarea de su método es cada hijo y los valores de los parámetros del método. Lo
-  da el verificador, que ya lo calcula, así que todo plan devuelto por esta vía está verificado
-  de forma independiente de la búsqueda. Si la verificación falla, el resultado es un error
-  interno (`Status::InternalError`), nunca un plan.
-- ⏳ Módulo Python `klimax` (nanobind, como el de Kairos): `solve`, `check`, `verify`.
-- ⏳ `up-klimax`, en su propio repositorio, con `up-kairos` como modelo: planificador de una
-  llamada para problemas jerárquicos sin tiempo ni números, y validador de planes jerárquicos.
-- ⏳ Pruebas con los problemas jerárquicos de ejemplo de unified-planning y comparación con
-  Aries en los que ambos resuelven.
+  da el verificador, así que todo plan devuelto por esta vía está verificado de forma
+  independiente de la búsqueda. Si la verificación falla, el resultado es un error interno
+  (`Status::InternalError`), nunca un plan.
+- ✅ Módulo Python `klimax` (nanobind, como el de Kairos; `python/` en el repositorio):
+  `solve`, `check`, `verify`. Sin dependencias en ejecución. Con `pyproject.toml` para la rueda
+  (`klimax-planner`), aún sin publicar.
+- ✅ `up-klimax` (`planner_ws/up-klimax`, repositorio local; falta crearlo en GitHub):
+  - `klimax`, planificador de una llamada para problemas jerárquicos; devuelve un
+    `HierarchicalPlan` de UPF y demuestra cuándo no hay plan (`UNSOLVABLE_PROVEN`).
+  - `klimax-val`, validador de planes jerárquicos (comprueba la descomposición).
+  - Lo que HDDL no sabe decir se reescribe antes, conservando los nombres: los fluentes con
+    valor de objeto pasan a predicados (con la reescritura del propio UPF, que solo la aplica
+    a problemas sin tareas) y las restricciones que no son `=` o su negación pasan a una
+    precondición (las de la red inicial, a un método de una tarea nueva que el plan omite).
+  - Cada característica declarada tiene su prueba: orden total y parcial, variables y
+    restricciones en las redes, condiciones negativas, disyuntivas, existenciales y
+    universales, igualdades, efectos condicionales y universales, tipos jerárquicos, fluentes
+    de objeto. 11 pruebas, incluido el ejemplo jerárquico de UPF y sus planes de referencia.
+- ✅ El banco del IPC 2023 por la vía UPF (`bench/htn/upf_route.py`: el lector de UPF lee el
+  HDDL, `up-klimax` planifica y valida): con un problema por dominio, 24 de 32 dominios llegan
+  al plan validado. Los 8 restantes se paran en el lector de UPF (nombres repetidos entre
+  tipos y objetos en Barman, Freecell y Woodworking; sintaxis que no lee en Snake y Colouring;
+  un tipo declarado dos veces en UM-Translog), no en Klimax. Son candidatos a aportar a UPF.
+- ⏳ Aprovechar el resto de UPF:
+  - Ofrecer la reescritura anterior como compilador de UPF: hoy no tiene ninguno para
+    problemas jerárquicos, y le sirve a cualquier motor HTN.
+  - Comparación con Aries (`up-aries`) por la misma vía, en los problemas que ambos expresan.
+  - El banco de pruebas de UPF (`up-test-cases`) y su informe de motores.
+  - Modo anytime, replanificación y reparación de planes: con H4 (anytime y óptimo).
+  - Con H5 y H6, declarar números y tiempo (`TASK_ORDER_TEMPORAL`, acciones durativas).
+- ⏳ Publicar: repositorio `PlanSys2/up-klimax`, ruedas de `klimax-planner` y alta en la lista
+  de motores de UPF. Con la primera versión pública de Klimax.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

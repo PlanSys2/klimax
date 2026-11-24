@@ -39,6 +39,7 @@ endfunction()
 klimax_add_gtest(hddl_parser_test hddl/parser_test.cpp)
 klimax_add_gtest(hddl_model_test hddl/model_test.cpp)
 klimax_add_gtest(verifier_test hddl/verifier_test.cpp)
+klimax_add_gtest(grounder_test hddl/grounder_test.cpp)
 
 if(KLIMAX_BUILD_CLI)
   add_test(NAME cli_version COMMAND klimax_cli --version)
@@ -76,4 +77,15 @@ if(KLIMAX_BUILD_CLI)
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.plan)
   set_tests_properties(cli_verify_wrong_plan PROPERTIES
     PASS_REGULAR_EXPRESSION "Plan verification result: false")
+endif()
+
+if(KLIMAX_BUILD_CLI)
+  # The ground problem contains the known plan
+  add_test(NAME cli_ground COMMAND klimax_cli --ground
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.hddl 0
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.plan)
+  set_tests_properties(cli_ground PROPERTIES
+    PASS_REGULAR_EXPRESSION "facts 24, actions 38, abstract tasks 26, methods 93"
+    FAIL_REGULAR_EXPRESSION "not in the ground problem")
 endif()

@@ -82,6 +82,12 @@ public:
       return fail();
     }
 
+    // Kairos expects a goal: a problem without one gets the empty conjunction
+    m_.has_goal = m_.problem.goal.valid();
+    if (!m_.has_goal) {
+      m_.problem.goal = m_.problem.nodes.formulas.push_back(ast::Formula{});
+    }
+
     m_.methods_of.assign(m_.tasks.size(), {});
     m_.total_order = !m_.has_htn || m_.initial.total_order;
     for (size_t i = 0; i < m_.methods.size(); ++i) {
@@ -118,17 +124,69 @@ private:
     for (size_t i = 0; i < methods_.size(); ++i) {
       const Method & method = methods_[i];
       if (!method.precondition.valid()) {
+        precondition_params_.emplace_back();
         continue;
       }
       ast::Action a;
       a.name = m_.pddl.symbols.intern(
         kPreconditionPrefix + std::string(m_.pddl.symbols.name(method.name)) + "#" +
         std::to_string(i));
-      a.params = method.params;
+      // Only the parameters the precondition mentions: the others would multiply its instances
+      std::unordered_set<uint32_t> used;
+      variables_of(method.precondition, used);
+      precondition_params_.emplace_back();
+      for (uint32_t p = 0; p < method.params.size(); ++p) {
+        if (used.count(method.params[p].name.value()) != 0) {
+          a.params.push_back(method.params[p]);
+          precondition_params_.back().push_back(p);
+        }
+      }
       a.precondition = method.precondition;
       a.loc = method.loc;
       precondition_action_[i] = static_cast<int32_t>(m_.pddl.actions.size());
       m_.pddl.actions.push_back(std::move(a));
+    }
+  }
+
+  // The variables a formula mentions (bound ones included: a superset is enough)
+  void variables_of(ast::FormulaId id, std::unordered_set<uint32_t> & out) const
+  {
+    const ast::Formula & f = m_.pddl.nodes.formulas[id];
+    for (ast::FormulaId c : f.children) {
+      variables_of(c, out);
+    }
+    for (ast::TermId t : f.args) {
+      variables_of(t, out);
+    }
+    for (ast::ExprId e : {f.lhs, f.rhs}) {
+      if (e.valid()) {
+        variables_of(e, out);
+      }
+    }
+  }
+
+  void variables_of(ast::ExprId id, std::unordered_set<uint32_t> & out) const
+  {
+    const ast::Expr & e = m_.pddl.nodes.exprs[id];
+    if (e.term.valid()) {
+      variables_of(e.term, out);
+    }
+    for (ast::TermId t : e.args) {
+      variables_of(t, out);
+    }
+    for (ast::ExprId c : e.children) {
+      variables_of(c, out);
+    }
+  }
+
+  void variables_of(ast::TermId id, std::unordered_set<uint32_t> & out) const
+  {
+    const ast::Term & t = m_.pddl.nodes.terms[id];
+    if (t.kind == ast::TermKind::Variable) {
+      out.insert(t.name.value());
+    }
+    for (ast::TermId a : t.args) {
+      variables_of(a, out);
     }
   }
 
@@ -371,6 +429,7 @@ private:
     out.name = name(in.name);
     out.loc = in.loc;
     out.precondition_action = precondition_action_[index];
+    out.precondition_params = precondition_params_[index];
     if (!method_names_.insert(out.name).second) {
       error("hddl.duplicate_method", "method " + out.name + " declared more than once", in.loc);
     }
@@ -416,6 +475,7 @@ private:
   std::vector<Diagnostic> diagnostics_;
   bool errors_ = false;
   std::vector<int32_t> precondition_action_;
+  std::vector<std::vector<uint32_t>> precondition_params_;
   std::unordered_map<std::string, size_t> task_index_;
   std::unordered_set<std::string> method_names_;
   std::unordered_map<std::string, uint32_t> vars_;

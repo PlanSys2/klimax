@@ -68,6 +68,31 @@ KLIMAX_API CheckResult check(
   std::string_view domain, std::string_view problem,
   std::string_view domain_file = "domain.hddl", std::string_view problem_file = "problem.hddl");
 
+/// @brief Sizes of the ground problem.
+struct GroundResult
+{
+  bool ok = false;
+  std::vector<Diagnostic> diagnostics;
+  bool unsolvable = false;   // proved: the initial tasks cannot be decomposed into actions
+  size_t facts = 0;
+  size_t actions = 0;        // ground primitive tasks
+  size_t abstract_tasks = 0;
+  size_t methods = 0;
+  double milliseconds = 0.0;
+  std::string missing;       // with a plan: the first step of it that is not in the ground problem
+};
+
+/**
+ * @brief Grounds a problem and reports its size. `seconds` limits the time (0: no limit).
+ *
+ * With a `plan` (IPC format), also checks that every action and every decomposition of it is in
+ * the ground problem: a valid plan must be, or the grounding prunes too much.
+ */
+KLIMAX_API GroundResult ground(
+  std::string_view domain, std::string_view problem, double seconds = 0.0,
+  std::string_view domain_file = "domain.hddl", std::string_view problem_file = "problem.hddl",
+  std::string_view plan = {});
+
 struct VerifyResult
 {
   bool valid = false;

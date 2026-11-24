@@ -831,7 +831,7 @@ private:
     for (const std::vector<uint32_t> & binding : n.bindings) {
       Env env;
       for (size_t p = 0; p < a.params.size(); ++p) {
-        env.emplace_back(a.params[p].name, binding[p]);
+        env.emplace_back(a.params[p].name, binding[method.precondition_params[p]]);
       }
       if (domain_.holds(a.precondition, state_, env)) {
         return true;

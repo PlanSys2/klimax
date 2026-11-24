@@ -99,9 +99,11 @@ struct MethodInfo
   std::vector<Param> params;
   TaskId task;
   std::vector<Arg> task_args;
-  // The precondition as an action of `pddl` with the method's parameters and no effect, so
-  // that Kairos checks and grounds it; -1 if the method has none
+  // The precondition as an action of `pddl` with no effect, so that Kairos checks and grounds
+  // it; -1 if the method has none
   int32_t precondition_action = -1;
+  // The parameters of that action: those the precondition mentions, as positions in `params`
+  std::vector<uint32_t> precondition_params;
   Network network;
   ast::Loc loc;
 };
@@ -119,6 +121,7 @@ struct Model
   std::vector<std::vector<uint32_t>> methods_of;  // by abstract TaskId value
 
   bool has_htn = false;  // false: a classical problem (a goal and no :htn)
+  bool has_goal = false;  // the problem states one; otherwise `problem.goal` is an empty (and)
   std::vector<Param> initial_params;
   Network initial;
 

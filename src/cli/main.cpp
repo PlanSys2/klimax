@@ -28,10 +28,12 @@ void print_usage(std::ostream & out)
 {
   out << "Usage: klimax --check DOMAIN PROBLEM\n"
       << "       klimax --verify DOMAIN PROBLEM PLAN\n"
+      << "       klimax --ground DOMAIN PROBLEM [SECONDS]\n"
       << "       klimax --version | --help\n"
       << "Klimax, an HTN planner for HDDL 2.1. Planning is not implemented yet.\n"
       << "  --check   read the domain and the problem and report every error\n"
-      << "  --verify  check a plan in the format of the IPC HTN tracks\n";
+      << "  --verify  check a plan in the format of the IPC HTN tracks\n"
+      << "  --ground  ground the problem and print its size\n";
 }
 
 std::optional<std::string> read_file(const char * path)
@@ -64,6 +66,36 @@ int check(const char * domain_path, const char * problem_path)
             << s.actions << ", tasks " << s.tasks << ", methods " << s.methods << ", objects "
             << s.objects << ", initial tasks " << s.initial_tasks << ", "
             << (s.total_order ? "total order" : "partial order") << "\n";
+  return 0;
+}
+
+// Exit codes: 0 grounded, 1 errors in the input or out of time, 2 bad usage
+int ground(
+  const char * domain_path, const char * problem_path, double seconds, const char * plan_path)
+{
+  auto domain = read_file(domain_path);
+  auto problem = read_file(problem_path);
+  std::optional<std::string> plan = plan_path != nullptr ? read_file(plan_path) : std::string();
+  if (!domain || !problem || !plan) {
+    return 2;
+  }
+  klimax::GroundResult r = klimax::ground(
+    *domain, *problem, seconds, domain_path, problem_path, *plan);
+  for (const klimax::Diagnostic & d : r.diagnostics) {
+    if (d.severity == klimax::Severity::Error) {
+      std::cerr << d.rendered << "\n";
+    }
+  }
+  if (!r.ok) {
+    return 1;
+  }
+  std::cout << "facts " << r.facts << ", actions " << r.actions << ", abstract tasks "
+            << r.abstract_tasks << ", methods " << r.methods << ", "
+            << (r.unsolvable ? "unsolvable, " : "") << r.milliseconds << " ms\n";
+  if (!r.missing.empty()) {
+    std::cout << "not in the ground problem: " << r.missing << "\n";
+    return 1;
+  }
   return 0;
 }
 
@@ -107,6 +139,15 @@ int main(int argc, char ** argv)
         return 2;
       }
       return check(argv[i + 1], argv[i + 2]);
+    }
+    if (arg == "--ground") {
+      // A plan after the time limit: checks that the ground problem contains it (for testing)
+      if (i + 3 > argc || i + 5 < argc) {
+        std::cerr << "klimax: --ground takes a domain, a problem and optionally a time limit\n";
+        return 2;
+      }
+      return ground(argv[i + 1], argv[i + 2], i + 4 <= argc ? std::stod(argv[i + 3]) : 0.0,
+               i + 5 == argc ? argv[i + 4] : nullptr);
     }
     if (arg == "--verify") {
       if (i + 4 != argc) {

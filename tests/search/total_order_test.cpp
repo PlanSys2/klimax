@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "hddl/model.hpp"
 #include "hddl/parser.hpp"
@@ -269,6 +270,40 @@ TEST(TotalOrderTest, StatesThatDifferInWhatNothingReads)
   EXPECT_EQ(with.result.outcome, Outcome::Unsolvable);
   EXPECT_EQ(without.result.outcome, Outcome::Unsolvable);
   EXPECT_LT(with.result.expansions * 2, without.result.expansions);
+}
+
+// With anytime the search goes on to the shortest plan, and says that it is
+TEST(TotalOrderTest, AnytimeFindsTheShortestPlan)
+{
+  auto d = hddl::parse_domain(kDomain, "d.hddl");
+  // Two rooms to visit, any two: the shortest tour looks at b, where the robot is, twice
+  auto p = hddl::parse_problem(problem("(:htn :ordered-subtasks (tour r1))"), "p.hddl");
+  auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+  ASSERT_TRUE(m.ok());
+  auto g = tdg::ground(m.value());
+  ASSERT_TRUE(g.ok());
+  std::vector<size_t> lengths;
+  Options options;
+  options.anytime = true;
+  options.on_plan = [&](const std::string & plan, size_t steps) {
+      EXPECT_TRUE(verifier::verify(m.value(), plan).valid);
+      lengths.push_back(steps);
+    };
+  const Result result = total_order(g.value(), nullptr, options);
+  ASSERT_EQ(result.outcome, Outcome::Solved);
+  EXPECT_TRUE(result.optimal);
+  EXPECT_EQ(result.steps, 2u);
+  EXPECT_EQ(result.plans, lengths.size());
+  ASSERT_FALSE(lengths.empty());
+  EXPECT_EQ(lengths.back(), 2u);
+  for (size_t i = 1; i < lengths.size(); ++i) {
+    EXPECT_LT(lengths[i], lengths[i - 1]);
+  }
+  EXPECT_TRUE(verifier::verify(m.value(), result.plan).valid);
+  // Without it, one plan and no claim
+  const Result first = total_order(g.value());
+  EXPECT_EQ(first.plans, 1u);
+  EXPECT_FALSE(first.optimal);
 }
 
 TEST(TotalOrderTest, Budget)

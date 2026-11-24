@@ -84,5 +84,19 @@ def test_summary():
     assert not klimax.check(DOMAIN, (DATA / "p2-partial-order.hddl").read_text()).summary.total_order
 
 
+def test_anytime():
+    problem = (DATA / "p1-total-order.hddl").read_text()
+    seen = []
+    result = klimax.solve(DOMAIN, problem, timeout=10, anytime=True,
+                          on_plan=lambda plan, steps: seen.append((plan, steps)))
+    assert result.status == klimax.Status.SOLVED and result.optimal
+    assert result.plans == len(seen) >= 1
+    assert [s for _, s in seen] == sorted({s for _, s in seen}, reverse=True)
+    assert seen[-1][1] == result.steps and seen[-1][0] == result.plan
+    assert all(klimax.verify(DOMAIN, problem, plan).valid for plan, _ in seen)
+    first = klimax.solve(DOMAIN, problem)
+    assert first.plans == 1 and not first.optimal and first.steps >= result.steps
+
+
 def test_version():
     assert klimax.__version__.count(".") == 2

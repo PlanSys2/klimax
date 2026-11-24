@@ -19,6 +19,7 @@
 #define KLIMAX__SEARCH__TOTAL_ORDER_HPP_
 
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "core/budget.hpp"
@@ -35,6 +36,14 @@ enum class Outcome : uint8_t
   Unsupported   // a partial order, numbers, axioms: `message` says which
 };
 
+struct Options
+{
+  // Once a plan is found, look for shorter ones until none is left or the budget runs out
+  bool anytime = false;
+  // Called with every plan found, each shorter than the one before (the last one is the result)
+  std::function<void(const std::string & plan, size_t steps)> on_plan;
+};
+
 struct Result
 {
   Outcome outcome = Outcome::Unsupported;
@@ -42,6 +51,8 @@ struct Result
   std::string message;  // Unsupported: what; otherwise, which way of searching answered
   size_t steps = 0;         // actions of the plan
   uint64_t expansions = 0;  // tasks taken from the stack
+  size_t plans = 0;         // found, each shorter than the one before
+  bool optimal = false;     // proved: no plan has fewer actions
 };
 
 /**
@@ -58,8 +69,14 @@ struct Result
  * Complete on a finite space when every task network is totally ordered. A partially ordered
  * network is searched in one of the orders it allows: a plan found is a plan, but none found
  * proves nothing (Unsupported, with a message).
+ *
+ * With `Options::anytime`, the search goes on after the first plan: depth first under a bound
+ * of one action fewer than the best plan so far, until the space under the bound is exhausted
+ * (the plan is then optimal in number of actions, when every network is totally ordered) or the
+ * budget runs out.
  */
-Result total_order(const tdg::Problem & problem, kairos::Budget * budget = nullptr);
+Result total_order(
+  const tdg::Problem & problem, kairos::Budget * budget = nullptr, const Options & options = {});
 
 }  // namespace klimax::search
 

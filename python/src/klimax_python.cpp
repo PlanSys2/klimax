@@ -16,6 +16,7 @@
 // Pythonic layer). Planning releases the GIL.
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/function.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
@@ -90,6 +91,8 @@ NB_MODULE(_klimax, m)
   .def_ro("message", &klimax::SolveResult::message)
   .def_ro("diagnostics", &klimax::SolveResult::diagnostics)
   .def_ro("steps", &klimax::SolveResult::steps)
+  .def_ro("plans", &klimax::SolveResult::plans)
+  .def_ro("optimal", &klimax::SolveResult::optimal)
   .def_ro("ground_ms", &klimax::SolveResult::ground_ms)
   .def_ro("search_ms", &klimax::SolveResult::search_ms)
   .def_ro("expansions", &klimax::SolveResult::expansions);
@@ -108,14 +111,24 @@ NB_MODULE(_klimax, m)
 
   m.def("solve",
     [](const std::string & domain, const std::string & problem, double timeout,
-    bool decomposition, const std::string & domain_file, const std::string & problem_file) {
+    bool decomposition, bool anytime, nb::object on_plan, const std::string & domain_file,
+    const std::string & problem_file) {
       klimax::SolveOptions options;
       options.seconds = timeout;
       options.decomposition = decomposition;
+      options.anytime = anytime;
+      if (!on_plan.is_none()) {
+        // Called from the search, which runs without the GIL
+        options.on_plan = [&on_plan](const std::string & plan, size_t steps) {
+            nb::gil_scoped_acquire acquire;
+            on_plan(plan, steps);
+          };
+      }
       nb::gil_scoped_release release;
       return klimax::solve(domain, problem, options, domain_file, problem_file);
     }, "domain"_a, "problem"_a, "timeout"_a = 0.0, "decomposition"_a = true,
-    "domain_file"_a = "domain.hddl", "problem_file"_a = "problem.hddl");
+    "anytime"_a = false, "on_plan"_a = nb::none(), "domain_file"_a = "domain.hddl",
+    "problem_file"_a = "problem.hddl");
 
   m.def("verify",
     [](const std::string & domain, const std::string & problem, const std::string & plan,

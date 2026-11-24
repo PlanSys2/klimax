@@ -26,13 +26,15 @@ namespace
 
 void print_usage(std::ostream & out)
 {
-  out << "Usage: klimax DOMAIN PROBLEM [--timeout SECONDS]\n"
+  out << "Usage: klimax DOMAIN PROBLEM [--timeout SECONDS] [--anytime]\n"
       << "       klimax --check DOMAIN PROBLEM\n"
       << "       klimax --verify DOMAIN PROBLEM PLAN\n"
       << "       klimax --ground DOMAIN PROBLEM [SECONDS]\n"
       << "       klimax --version | --help\n"
       << "Klimax, an HTN planner for HDDL 2.1. It plans for HDDL 1.0 problems for now;\n"
       << "the plan and its decomposition are written in the format of the IPC HTN tracks.\n"
+      << "  --anytime go on after the first plan, looking for shorter ones, until none is\n"
+      << "            left or the time runs out; the shortest found is written\n"
       << "  --check   read the domain and the problem and report every error\n"
       << "  --verify  check a plan in the format of the IPC HTN tracks\n"
       << "  --ground  ground the problem and print its size\n";
@@ -103,7 +105,7 @@ int ground(
 
 // Exit codes: 0 solved, 1 errors in the input, 2 bad usage, 10 unsolvable, 11 out of time,
 // 12 not supported
-int solve(const char * domain_path, const char * problem_path, double seconds)
+int solve(const char * domain_path, const char * problem_path, double seconds, bool anytime)
 {
   auto domain = read_file(domain_path);
   auto problem = read_file(problem_path);
@@ -112,6 +114,12 @@ int solve(const char * domain_path, const char * problem_path, double seconds)
   }
   klimax::SolveOptions options;
   options.seconds = seconds;
+  options.anytime = anytime;
+  if (anytime) {
+    options.on_plan = [](const std::string &, size_t steps) {
+        std::cerr << "; plan of " << steps << " actions\n";
+      };
+  }
   klimax::SolveResult r = klimax::solve(*domain, *problem, options, domain_path, problem_path);
   for (const klimax::Diagnostic & d : r.diagnostics) {
     if (d.severity == klimax::Severity::Error) {
@@ -120,7 +128,8 @@ int solve(const char * domain_path, const char * problem_path, double seconds)
   }
   std::cerr << "; " << klimax::to_string(r.status) << (r.message.empty() ? "" : ": ") << r.message
             << "; ground " << r.ground_ms << " ms, search " << r.search_ms << " ms, "
-            << r.expansions << " expansions\n";
+            << r.expansions << " expansions" << (r.optimal ? "; no shorter plan exists" : "")
+            << "\n";
   switch (r.status) {
     case klimax::Status::Solved:
       std::cout << r.plan;
@@ -159,16 +168,22 @@ int verify(const char * domain_path, const char * problem_path, const char * pla
 
 int main(int argc, char ** argv)
 {
-  // klimax DOMAIN PROBLEM [--timeout SECONDS]
+  // klimax DOMAIN PROBLEM [--timeout SECONDS] [--anytime]
   if (argc >= 3 && argv[1][0] != '-') {
     double seconds = 0.0;
-    if (argc == 5 && std::string_view(argv[3]) == "--timeout") {
-      seconds = std::stod(argv[4]);
-    } else if (argc != 3) {
-      print_usage(std::cerr);
-      return 2;
+    bool anytime = false;
+    for (int i = 3; i < argc; ++i) {
+      const std::string_view arg = argv[i];
+      if (arg == "--timeout" && i + 1 < argc) {
+        seconds = std::stod(argv[++i]);
+      } else if (arg == "--anytime") {
+        anytime = true;
+      } else {
+        print_usage(std::cerr);
+        return 2;
+      }
     }
-    return solve(argv[1], argv[2], seconds);
+    return solve(argv[1], argv[2], seconds, anytime);
   }
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];

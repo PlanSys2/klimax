@@ -361,6 +361,37 @@ public:
   Search(const tdg::Problem & problem, kairos::Budget * budget)
   : p_(problem), m_(problem.model), g_(problem.pddl), budget_(budget) {}
 
+  // Shorter plans than the one in `result`, until there is none or the budget runs out
+  void improve(Result & result, const Options & options)
+  {
+    result.plans = 1;
+    if (options.on_plan) {
+      options.on_plan(result.plan, result.steps);
+    }
+    relaxed_ = free_.get();
+    guided_ = false;
+    limit_ = ~uint64_t{0};
+    while (result.steps > 0) {
+      Result shorter;
+      const Outcome outcome = iteration(result.steps - 1, shorter);
+      result.expansions = expansions_;
+      if (outcome != Outcome::Solved) {
+        // The whole space under the bound was searched: in one order of each network only,
+        // if the problem is partially ordered
+        result.optimal = outcome == Outcome::Unsolvable && !linearized_;
+        return;
+      }
+      result.plan = std::move(shorter.plan);
+      result.steps = shorter.steps;
+      result.message = "depth first, fixed order, under the length of the plan before";
+      ++result.plans;
+      if (options.on_plan) {
+        options.on_plan(result.plan, result.steps);
+      }
+    }
+    result.optimal = true;
+  }
+
   Result run()
   {
     Result result;
@@ -2469,7 +2500,8 @@ private:
 
 }  // namespace
 
-Result total_order(const tdg::Problem & problem, kairos::Budget * budget)
+Result total_order(
+  const tdg::Problem & problem, kairos::Budget * budget, const Options & options)
 {
   if (problem.unsolvable) {
     Result result;
@@ -2478,6 +2510,16 @@ Result total_order(const tdg::Problem & problem, kairos::Budget * budget)
   }
   Search search(problem, budget);
   Result result = search.run();
+  if (result.outcome == Outcome::Solved) {
+    if (options.anytime) {
+      search.improve(result, options);
+    } else {
+      result.plans = 1;
+      if (options.on_plan) {
+        options.on_plan(result.plan, result.steps);
+      }
+    }
+  }
   if (result.outcome == Outcome::Unsolvable && !problem.model.total_order && !search.proved_) {
     result.outcome = Outcome::Unsupported;
     result.message = "no plan with the subtasks of each task network in one order, and the "

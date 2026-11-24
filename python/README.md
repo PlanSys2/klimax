@@ -21,6 +21,9 @@ if result.status == klimax.Status.SOLVED:
   With `decomposition`, the plan is verified independently of the search before it is returned,
   and given as steps: of each task, its method, the values of the method's parameters and which
   step is each of its subtasks.
+  With `anytime=True` it goes on after the first plan looking for shorter ones, calling
+  `on_plan(plan, steps)` with each, until none is left or the time runs out; `optimal` says
+  whether the last one was proved the shortest.
 - `check(domain, problem)`: every error found, with file, line and column.
 - `verify(domain, problem, plan)`: whether a plan in the IPC format solves the problem, and why
   not.

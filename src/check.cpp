@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "klimax/check.hpp"
+#include "klimax/solve.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -25,6 +26,7 @@
 #include "hddl/model.hpp"
 #include "hddl/parser.hpp"
 #include "kairos/diagnostics.hpp"
+#include "search/total_order.hpp"
 #include "tdg/grounder.hpp"
 #include "verify/verifier.hpp"
 
@@ -185,6 +187,85 @@ GroundResult ground(
     result.missing = first_missing(ground->model, ground.value(), plan);
   }
   return result;
+}
+
+SolveResult solve(
+  std::string_view domain, std::string_view problem, const SolveOptions & options,
+  std::string_view domain_file, std::string_view problem_file)
+{
+  SolveResult result;
+  const auto start = std::chrono::steady_clock::now();
+  auto d = hddl::parse_domain(domain, domain_file);
+  append(result.diagnostics, d.diagnostics(), domain);
+  auto p = hddl::parse_problem(problem, problem_file);
+  append(result.diagnostics, p.diagnostics(), problem);
+  if (!d.ok() || !p.ok()) {
+    return result;
+  }
+  auto model = hddl::analyze(std::move(d).value(), std::move(p).value());
+  append(result.diagnostics, model.diagnostics(), "");
+  if (!model.ok()) {
+    return result;
+  }
+  if (!model->has_htn) {
+    result.status = Status::Unsupported;
+    result.message = "a problem without :htn is a PDDL problem: use Kairos";
+    return result;
+  }
+  kairos::BudgetConfig config;
+  if (options.seconds > 0.0) {
+    config.deadline = start + std::chrono::duration_cast<kairos::BudgetConfig::Clock::duration>(
+      std::chrono::duration<double>(options.seconds));
+  }
+  kairos::Budget budget(config);
+  auto ground = tdg::ground(model.value(), &budget);
+  auto since = [&]() {
+      return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    };
+  result.ground_ms = since();
+  if (!ground.ok()) {
+    const bool budget_out = !ground.diagnostics().empty() &&
+      ground.diagnostics()[0].code == "ground.budget";
+    if (!budget_out) {
+      append(result.diagnostics, ground.diagnostics(), "");
+    }
+    result.status = budget_out ? Status::Timeout : Status::Unsupported;
+    result.message = budget_out ? "" : "the problem cannot be grounded";
+    return result;
+  }
+  search::Result found = search::total_order(ground.value(), &budget);
+  result.search_ms = since() - result.ground_ms;
+  result.expansions = found.expansions;
+  result.steps = found.steps;
+  result.message = std::move(found.message);
+  switch (found.outcome) {
+    case search::Outcome::Solved:
+      result.status = Status::Solved;
+      result.plan = std::move(found.plan);
+      break;
+    case search::Outcome::Unsolvable:
+      result.status = Status::Unsolvable;
+      break;
+    case search::Outcome::OutOfBudget:
+      result.status = Status::Timeout;
+      break;
+    case search::Outcome::Unsupported:
+      result.status = Status::Unsupported;
+      break;
+  }
+  return result;
+}
+
+std::string_view to_string(Status status)
+{
+  switch (status) {
+    case Status::Solved: return "solved";
+    case Status::Unsolvable: return "unsolvable";
+    case Status::Timeout: return "timeout";
+    case Status::Unsupported: return "unsupported";
+    default: return "invalid input";
+  }
 }
 
 VerifyResult verify(

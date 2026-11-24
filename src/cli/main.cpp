@@ -26,11 +26,13 @@ namespace
 
 void print_usage(std::ostream & out)
 {
-  out << "Usage: klimax --check DOMAIN PROBLEM\n"
+  out << "Usage: klimax DOMAIN PROBLEM [--timeout SECONDS]\n"
+      << "       klimax --check DOMAIN PROBLEM\n"
       << "       klimax --verify DOMAIN PROBLEM PLAN\n"
       << "       klimax --ground DOMAIN PROBLEM [SECONDS]\n"
       << "       klimax --version | --help\n"
-      << "Klimax, an HTN planner for HDDL 2.1. Planning is not implemented yet.\n"
+      << "Klimax, an HTN planner for HDDL 2.1. It plans for totally ordered HDDL 1.0 problems;\n"
+      << "the plan and its decomposition are written in the format of the IPC HTN tracks.\n"
       << "  --check   read the domain and the problem and report every error\n"
       << "  --verify  check a plan in the format of the IPC HTN tracks\n"
       << "  --ground  ground the problem and print its size\n";
@@ -99,6 +101,37 @@ int ground(
   return 0;
 }
 
+// Exit codes: 0 solved, 1 errors in the input, 2 bad usage, 10 unsolvable, 11 out of time,
+// 12 not supported
+int solve(const char * domain_path, const char * problem_path, double seconds)
+{
+  auto domain = read_file(domain_path);
+  auto problem = read_file(problem_path);
+  if (!domain || !problem) {
+    return 2;
+  }
+  klimax::SolveOptions options;
+  options.seconds = seconds;
+  klimax::SolveResult r = klimax::solve(*domain, *problem, options, domain_path, problem_path);
+  for (const klimax::Diagnostic & d : r.diagnostics) {
+    if (d.severity == klimax::Severity::Error) {
+      std::cerr << d.rendered << "\n";
+    }
+  }
+  std::cerr << "; " << klimax::to_string(r.status) << (r.message.empty() ? "" : ": ") << r.message
+            << "; ground " << r.ground_ms << " ms, search " << r.search_ms << " ms, "
+            << r.expansions << " expansions\n";
+  switch (r.status) {
+    case klimax::Status::Solved:
+      std::cout << r.plan;
+      return 0;
+    case klimax::Status::Unsolvable: return 10;
+    case klimax::Status::Timeout: return 11;
+    case klimax::Status::Unsupported: return 12;
+    default: return 1;
+  }
+}
+
 // Exit codes: 0 valid plan, 1 invalid plan or errors in the input, 2 bad usage
 int verify(const char * domain_path, const char * problem_path, const char * plan_path)
 {
@@ -126,6 +159,17 @@ int verify(const char * domain_path, const char * problem_path, const char * pla
 
 int main(int argc, char ** argv)
 {
+  // klimax DOMAIN PROBLEM [--timeout SECONDS]
+  if (argc >= 3 && argv[1][0] != '-') {
+    double seconds = 0.0;
+    if (argc == 5 && std::string_view(argv[3]) == "--timeout") {
+      seconds = std::stod(argv[4]);
+    } else if (argc != 3) {
+      print_usage(std::cerr);
+      return 2;
+    }
+    return solve(argv[1], argv[2], seconds);
+  }
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--version") {

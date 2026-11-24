@@ -31,7 +31,7 @@ void print_usage(std::ostream & out)
       << "       klimax --verify DOMAIN PROBLEM PLAN\n"
       << "       klimax --ground DOMAIN PROBLEM [SECONDS]\n"
       << "       klimax --version | --help\n"
-      << "Klimax, an HTN planner for HDDL 2.1. It plans for totally ordered HDDL 1.0 problems;\n"
+      << "Klimax, an HTN planner for HDDL 2.1. It plans for HDDL 1.0 problems for now;\n"
       << "the plan and its decomposition are written in the format of the IPC HTN tracks.\n"
       << "  --check   read the domain and the problem and report every error\n"
       << "  --verify  check a plan in the format of the IPC HTN tracks\n"

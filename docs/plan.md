@@ -159,8 +159,8 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 |---|---|---|---|
 | H0 | ✅ | Semántica de HDDL 2.1 por escrito; decisión sobre `kairos::core`; infraestructura de medida con PANDA, Lilotane, HyperTensioN, Aries, SIADEX y PDDL4J instalados | Línea base reproducida frente a los resultados del IPC 2023 |
 | H1 | ✅ | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
-| H2 | 🔄 | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
-| H3 | 🔄 | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
+| H2 | ✅ | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
+| H3 | ✅ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
 | H3b | ⏳ | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
 | H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
 | H5 | ⏳ | Numérico | Más de 91/140 en el banco de Quenard |
@@ -238,7 +238,8 @@ Detalle de H2:
   | Klimax, con primero-el-mejor en los turnos | 201 | 310 | por medir |
   | Klimax, con el objetivo en la estimación | 219 | 369 | 475 |
   | Klimax, desempate por antigüedad | 232 | 398 | 493 |
-  | **Klimax, con relajación ordenada por turnos** | **247** | **421** | **509** |
+  | Klimax, con relajación ordenada por turnos | 247 | 421 | 509 |
+  | **Klimax, con la comprobación del objetivo sobre la pila** | **251** | **426** | **522** |
   | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
   | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
   | HyperTensioN | 52 | 298 | 332 |
@@ -292,10 +293,21 @@ casi hecha):
   problema es de orden parcial; si agota su espacio, «sin solución» es una prueba.
 - ✅ Los planes se escriben con los nombres tal como están en la entrada: el verificador del IPC
   distingue mayúsculas en su modo estricto.
-- 🔄 Medida con la búsqueda entrelazada (una estimación a 2 s, sin el arnés: 202 de 283, todos
-  los planes válidos según el verificador de Klimax).
-- ⏳ Reducir la ramificación del entrelazado (Colouring: 3 de 30).
-- ⏳ Criterio de salida: cobertura ≥ Linear y PANDApro.
+- ✅ Medida en la categoría de orden parcial (283 problemas, planes verificados):
+
+  | | 100 ms | 1 s | 30 s |
+  |---|---|---|---|
+  | **Klimax** | **150** | **199** | **230** |
+  | Linear-Simple | 128 | 161 | 207 |
+  | Linear-Complex | 123 | 162 | 204 |
+  | PANDA ppro | 101 | 118 | 156 |
+
+  Por dominios a 30 s, frente al mejor de los demás en cada uno: por delante en 4, igual en 5 y
+  por detrás en 2 (Woodworking 13 frente a 18, Monroe parcialmente observable 14 frente a 15).
+- ✅ Memoria acotada por búsqueda (1,5 GB cada una) y salida ordenada si se agota.
+- ⏳ Reducir la ramificación del entrelazado (Colouring: 8 de 30; se queda sin memoria).
+- ✅ Criterio de salida: cobertura ≥ Linear y PANDApro. Cumplido en las tres marcas.
+
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

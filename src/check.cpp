@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <new>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -275,7 +276,13 @@ SolveResult solve(
     result.message = budget_out ? "" : "the problem cannot be grounded";
     return result;
   }
-  search::Result found = search::total_order(ground.value(), &budget);
+  search::Result found;
+  try {
+    found = search::total_order(ground.value(), &budget);
+  } catch (const std::bad_alloc &) {
+    found.outcome = search::Outcome::OutOfBudget;
+    found.message = "out of memory";
+  }
   result.search_ms = since() - result.ground_ms;
   result.expansions = found.expansions;
   result.steps = found.steps;

@@ -508,6 +508,7 @@ private:
   static constexpr uint64_t kInfinite = ~uint64_t{0} / 4;
   static constexpr size_t kLookAheadLimit = 20000;   // operators of the relaxed problem
   static constexpr size_t kHeuristicLimit = 400000;
+  static constexpr size_t kSearchMemory = size_t{3} << 29;  // 1.5 GB for each best-first search
 
   Outcome iteration(uint64_t bound, Result & result)
   {
@@ -1413,7 +1414,10 @@ private:
       if ((budget_ != nullptr && budget_->exhausted()) || work_ >= limit_) {
         return Outcome::OutOfBudget;
       }
-      if (bf_->states.size() * sizeof(uint64_t) > (size_t{3} << 30)) {
+      if (bf_->states.size() * sizeof(uint64_t) + bf_->cells.size() * sizeof(Cell) +
+        bf_->nodes.size() * sizeof(BfNode) + bf_->exec.size() * sizeof(BfEvent) +
+        bf_->open.size() * 16 + bf_->seen.size() * 32 > kSearchMemory)
+      {
         bf_->over = true;  // out of room: the other searches go on
         return Outcome::OutOfBudget;
       }
@@ -1693,8 +1697,11 @@ private:
       if ((budget_ != nullptr && budget_->exhausted()) || work_ >= limit_) {
         return Outcome::OutOfBudget;
       }
-      if ((po_states_.size() + po_items_.size() + po_edges_.size()) * sizeof(uint64_t) >
-        (size_t{3} << 30))
+      // Each search keeps what it has between turns: none may take more than its part of the
+      // memory, or the others would have none
+      if ((po_states_.size() + po_items_.size() + po_edges_.size()) * sizeof(uint64_t) +
+        po_nodes_.size() * sizeof(PoNode) + po_open_.size() * 16 + po_seen_.size() * 32 >
+        kSearchMemory)
       {
         po_over_ = true;
         return Outcome::OutOfBudget;
@@ -2039,7 +2046,11 @@ private:
       // Seen with as few actions done: nothing new from here
       const uint64_t key = mix(state_hash_ ^ (top == kNone ? 0x51ull : cells_[top].hash));
       bool repeated = false;
-      if (!too_long) {
+      if (!too_long && seen_.size() >= 40000000) {
+        // Out of room to remember more: search on without (slower, still correct)
+        auto it = seen_.find(key);
+        repeated = it != seen_.end() && it->second <= done;
+      } else if (!too_long) {
         auto [it, fresh] = seen_.emplace(key, done);
         repeated = !fresh && it->second <= done;
         if (!fresh && it->second > done) {
@@ -2238,8 +2249,8 @@ Result total_order(const tdg::Problem & problem, kairos::Budget * budget)
   Result result = search.run();
   if (result.outcome == Outcome::Unsolvable && !problem.model.total_order && !search.proved_) {
     result.outcome = Outcome::Unsupported;
-    result.message = "no plan with the subtasks of each task network in the order tried; "
-      "interleaving them is not searched yet";
+    result.message = "no plan with the subtasks of each task network in one order, and the "
+      "search that interleaves them ran out of memory";
   }
   return result;
 }

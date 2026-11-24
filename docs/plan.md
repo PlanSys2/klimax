@@ -237,7 +237,8 @@ Detalle de H2:
   | Klimax, con heurística por turnos | 195 | 300 | 372 |
   | Klimax, con primero-el-mejor en los turnos | 201 | 310 | por medir |
   | Klimax, con el objetivo en la estimación | 219 | 369 | 475 |
-  | Klimax, desempate por antigüedad | 232 | 395 | por medir |
+  | Klimax, desempate por antigüedad | 232 | 398 | 493 |
+  | Klimax, con relajación ordenada por turnos | 247 | 420 | por medir |
   | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
   | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
   | HyperTensioN | 52 | 298 | 332 |
@@ -245,6 +246,22 @@ Detalle de H2:
   Donde más falta: Multiarm-Blocksworld, Logistics, Blocksworld-HPDDL y Woodworking, en los que
   la búsqueda en profundidad se compromete con una rama y no la suelta. Apunta a una búsqueda
   primero-el-mejor con la misma heurística.
+- ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
+- ✅ Búsqueda primero-el-mejor con la heurística, como tercer modo de los turnos: a 1 s gana a
+  PandaDealer en 12 dominios, empata en 1 y pierde en 10.
+- ✅ El estado objetivo del problema entra en la estimación (antes solo se comprobaba al final):
+  Multiarm-Blocksworld pasa de 9 a 49 resueltos a 1 s y Blocksworld-GTOHP de 15 a 25. Con esto
+  Klimax supera a 1 s a todos los planificadores de la línea base (367 frente a 318).
+- ✅ Primero-el-mejor con desempate por antigüedad y evaluación diferida (medido en una muestra
+  de 192 problemas frente a otras tres variantes): AssemblyHierarchical pasa de 12 a 28 a 1 s.
+- ✅ En primero-el-mejor, lo que no tiene alternativa se hace en el mismo nodo (acciones y
+  descomposiciones con un único método aplicable): las cadenas de trámite no cuestan nodos.
+- ✅ Relajación ordenada: los efectos de una acción solo cuentan como paso de un método, tras los
+  pasos anteriores. Corrige la ceguera de la relajación libre en Logistics (acciones de bloqueo
+  sin precondición daban cualquier tarea por hecha con coste 2). No sirve de prueba de
+  imposibilidad, así que solo ordena. Dos búsquedas primero-el-mejor, una con cada relajación,
+  se turnan con las dos en profundidad.
+- ⏳ Logistics a 30 s con la relajación ordenada, y Woodworking, Hiking y Robot.
 - ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
 - ✅ Búsqueda primero-el-mejor con la heurística, como tercer modo de los turnos: a 1 s gana a
   PandaDealer en 12 dominios, empata en 1 y pierde en 10.

@@ -2,8 +2,9 @@
 
 Klimax supports **HDDL 1.0 in full** and **HDDL 2.1**. This document says what Klimax accepts
 and what a solution is. HDDL 2.1 is a proposal, not a closed standard: where it is silent or
-ambiguous, this document takes a decision and marks it **[decision]**, so that it can be discussed
-and changed before the temporal engine is written.
+ambiguous, this document takes a decision and marks it **[decision]**. Klimax implements these
+decisions; they are proposed to the authors once the whole language works, and corrected then
+if needed.
 
 Sources:
 
@@ -165,7 +166,8 @@ Anything outside this is an error with file, line and column, never a silent app
 
 ## 6. Open questions
 
-To settle with the authors of the proposal before the temporal engine:
+To propose to the authors of HDDL 2.1 once Klimax implements all of it, with the planner, the
+benchmark and the verifier as evidence:
 
 1. The interval of an abstract task: exactly its subtasks (3.2, point 3) or any interval that
    contains them, as the 2023 definition of decomposition allows.

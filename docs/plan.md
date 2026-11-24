@@ -186,7 +186,8 @@ Pasan a la fase que los necesita:
 
 - ⏳ Configuraciones óptimas y satisficing con mejora de plan de los competidores (H4).
 - ⏳ Banco numérico de Quenard y SibylSmt (H5).
-- ⏳ Discutir con los autores de HDDL 2.1 las decisiones de semántica (antes de H6).
+- ⏳ Proponer a los autores de HDDL 2.1 las decisiones de semántica: cuando Klimax resuelva
+  HDDL 2.1 completo y haya banco y verificador que lo respalden (tras H6), no antes.
 
 Detalle de H1:
 
@@ -205,8 +206,9 @@ H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde est
 
 ## 6. Riesgos
 
-- **Semántica no cerrada.** Mitigación: escribirla en H0, discutirla en los issues del repo de la
-  propuesta y con sus autores antes de H6.
+- **Semántica no cerrada.** Mitigación: escribirla en H0 con cada decisión marcada, implementarla
+  hasta el final y proponerla a los autores con el planificador, el banco y el verificador como
+  prueba. Si después cambia algo, se corrige.
 - **Sin banco temporal.** Crearlo es trabajo y puede discutirse su imparcialidad. Mitigación:
   derivarlo de dominios del IPC, publicar generadores y proponerlo al IPC 2027.
 - **PANDA es un rival serio y activo.** Igualarlo puede llevar más que H2–H4. Mitigación: medir

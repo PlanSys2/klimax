@@ -9,8 +9,14 @@ Sources:
 
 - HDDL 1.0: Höller et al., *HDDL: An Extension to PDDL for Expressing Hierarchical Planning
   Problems*, AAAI 2020. The language of the HTN tracks of IPC 2020 and IPC 2023.
-- HDDL 2.1: Pellier et al., arXiv 2206.01822 and 2306.07353, and the grammar in
-  `github.com/pellierd/HDDL2.1` (`extened-bnf.tex`, commit of 2025-01-09).
+- HDDL 2.1: Pellier et al., in two papers, and the grammar in `github.com/pellierd/HDDL2.1`
+  (`extened-bnf.tex`, commit of 2025-01-09):
+  - arXiv 2206.01822 (2022), *Towards Defining an HTN Formalism with Time*: syntax, and
+    semantics only for the method constraints. It leaves durations and time constraints across
+    decompositions as open questions.
+  - arXiv 2306.07353 (2023), *Towards Defining a Formalism and a Semantics for Temporal HTN
+    Planning*: adds definitions of executable temporal task network, decomposition and solution.
+    Where the two differ, this document follows the second.
 - PDDL 2.1, 2.2 and 3.0 for everything HDDL 2.1 borrows. Klimax follows Kairos wherever a
   construct is plain PDDL.
 
@@ -76,9 +82,12 @@ Every task occurrence `t` has two time points, `start(t)` and `end(t)`, with
 2. An **instantaneous action** in a temporal problem has `start = end`.
 3. **Envelope**: for an abstract task `t` decomposed by a method with subtasks `s1 … sn`,
    `start(t) = min start(si)` and `end(t) = max end(si)`. With no subtasks, `start(t) = end(t)`.
-   **[decision]** The proposal says a method lasts "the sum of the durations of the subtasks",
-   which is only right for a total order with no gaps. The envelope gives that value in that case
-   and is defined in every other.
+   **[decision]** The 2023 paper only requires the task to contain its subtasks
+   (`start(t) ≤ start(si)` and `end(t) ≥ end(si)`, in its definition of decomposition) and calls
+   the duration of an abstract task "generally unbounded". The 2022 paper says "the sum" of the
+   durations in one section and "the max" in another. Klimax takes the tightest interval the 2023
+   constraints allow: with containment alone, a constraint such as `(>= ?duration 10)` would be
+   met by any decomposition, since the task could always be stretched.
 4. **Ordering constraints** compare time points with `<`, `<=`, `=`, `>=`, `>`. A bare task id
    stands for a point by its side: `(< a b)` means `end(a) < start(b)`, as in HDDL 1.0.
    `:ordered-subtasks` means `end(si) ≤ start(si+1)` **[decision]** (not strict: two consecutive
@@ -92,10 +101,12 @@ Every task occurrence `t` has two time points, `start(t)` and `end(t)`, with
    in the open interval between them. A plain `:precondition` on a durative method means
    `at start`.
 7. **Timed initial literals** follow PDDL 2.2.
-8. **Time**: rational, with the `ε` of PDDL 2.1 (Kairos' default, 0.001). **[decision]** The
-   proposal recommends integers to keep the problem decidable; Klimax keeps rationals for
-   compatibility with PDDL plans and validators, and does not promise termination on problems
-   whose only solutions need unbounded precision.
+8. **Time**: rational, with the `ε` of PDDL 2.1 (Kairos' default, 0.001). **[decision]** This
+   departs from the 2023 paper, which defines dates and durations as natural numbers to keep the
+   problem decidable. Klimax keeps rationals for compatibility with PDDL plans and validators,
+   and does not promise termination on problems whose only solutions need unbounded precision.
+   A problem whose durations are integers has integer solutions under both readings whenever no
+   `ε` separation is needed.
 9. **Delays** between tasks (at least `d` after the end of another) are not in the language. They
    are modelled with an auxiliary durative action, as the proposal suggests.
 
@@ -112,7 +123,9 @@ The timed constraints (`at`, `hold-during`, `hold-after`, `always`, `sometime`, 
 `sometime-before`, `sometime-after`, `always-within`, `within`) have the semantics of the PDDL 3.0
 trajectory constraints **restricted to the interval of the method that states them**
 **[decision]**: from `start(t)` to `end(t)` of the decomposed task. In the initial task network
-the interval is the whole plan.
+the interval is the whole plan. The 2023 paper evaluates them on the trajectory of "the task
+network", and its decomposition merges the constraints of a method into those of the whole
+network; read literally, an `always` stated in a method would then hold over the whole plan.
 
 ## 4. Syntax accepted
 
@@ -154,8 +167,10 @@ Anything outside this is an error with file, line and column, never a silent app
 
 To settle with the authors of the proposal before the temporal engine:
 
-1. The envelope rule (3.2, point 3) against "sum of the durations".
+1. The interval of an abstract task: exactly its subtasks (3.2, point 3) or any interval that
+   contains them, as the 2023 definition of decomposition allows.
 2. Whether `:ordered-subtasks` forbids gaps between consecutive subtasks.
 3. The interval of the timed constraints of a method (3.3).
 4. Where the numeric expressions of a method duration constraint are evaluated.
 5. A plan format for temporal hierarchical plans, and a verifier.
+6. Natural numbers against rationals for time (3.2, point 8).

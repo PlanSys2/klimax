@@ -18,12 +18,15 @@ grounder, heuristics, temporal network, validator).
 - [docs/semantics.md](docs/semantics.md): the language Klimax accepts and what a solution is.
 - [docs/plan.md](docs/plan.md): state of the art, design and phases.
 - [docs/baseline.md](docs/baseline.md): the existing HTN planners on the IPC 2023 benchmark.
+- [docs/results.md](docs/results.md): Klimax against them, on total order.
 
 ## Using
 
-Planning is not implemented yet. What works:
+Klimax plans for totally ordered HDDL 1.0 problems. Partial order, numbers and time are not
+planned yet.
 
 ```
+klimax DOMAIN PROBLEM [--timeout S]    # the plan and its decomposition, in the IPC format
 klimax --check DOMAIN PROBLEM          # read HDDL 1.0 and report every error
 klimax --verify DOMAIN PROBLEM PLAN    # check a plan in the format of the IPC HTN tracks
 ```

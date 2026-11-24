@@ -235,6 +235,7 @@ Detalle de H2:
   |---|---|---|---|
   | Klimax, orden fijo | 198 | 264 | 330 |
   | Klimax, con heurística por turnos | 195 | 300 | 372 |
+  | Klimax, con primero-el-mejor en los turnos | 201 | 310 | por medir |
   | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
   | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
   | HyperTensioN | 52 | 298 | 332 |
@@ -243,7 +244,9 @@ Detalle de H2:
   la búsqueda en profundidad se compromete con una rama y no la suelta. Apunta a una búsqueda
   primero-el-mejor con la misma heurística.
 - ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
-- ⏳ Búsqueda primero-el-mejor con la heurística.
+- ✅ Búsqueda primero-el-mejor con la heurística, como tercer modo de los turnos: a 1 s gana a
+  PandaDealer en 12 dominios, empata en 1 y pierde en 10.
+- ⏳ Mejorar la guía en Multiarm-Blocksworld, Logistics, Woodworking, Robot y Blocksworld-GTOHP.
 - ⏳ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761).
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.

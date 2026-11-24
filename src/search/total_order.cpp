@@ -24,6 +24,7 @@
 #include <random>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -312,6 +313,25 @@ public:
     // the one before, so that the total is at most a few times what the better one needs.
     const bool trace = std::getenv("KLIMAX_TRACE_SEARCH") != nullptr;
     for (uint64_t turn = 4000; ; turn *= 2) {
+      if (relaxed_ != nullptr && !best_first_over_) {
+        limit_ = work_ + turn;
+        const Outcome outcome = best_first(result);
+        result.expansions = expansions_;
+        if (trace) {
+          std::fprintf(stderr, "best first: %s, %llu expansions so far, %zu nodes\n",
+            outcome == Outcome::Solved ? "solved" : outcome == Outcome::Unsolvable ? "nothing" :
+            "stopped", static_cast<unsigned long long>(expansions_), bf_nodes_.size());
+        }
+        if (outcome == Outcome::Solved || outcome == Outcome::Unsolvable) {
+          result.outcome = outcome;
+          result.steps = bf_steps_;
+          return result;
+        }
+        if (budget_ != nullptr && budget_->exhausted()) {
+          result.outcome = Outcome::OutOfBudget;
+          return result;
+        }
+      }
       for (const bool guided : {true, false}) {
         if (guided && relaxed_ == nullptr) {
           continue;
@@ -834,6 +854,240 @@ private:
     }
   }
 
+  // --- Best first ----------------------------------------------------------------------------
+  // Greedy best-first search over (state, stack): the node with the lowest relaxed cost of what
+  // is left is expanded next, wherever it is. Expanding a node runs the actions at the top of
+  // its stack and then gives one successor per method of the task that follows. It keeps what
+  // it has between turns.
+
+  struct BfNode
+  {
+    uint32_t parent = kNone;
+    uint32_t top = kNone;         // its stack, in bf_cells_
+    uint32_t did_cell = kNone;    // the task it decomposed to get here (kNone: the initial one)
+    uint32_t did_method = kNone;
+    uint32_t first_child = 0;     // the cells that decomposition made
+    uint32_t child_count = 0;
+    uint32_t exec_start = 0;      // the actions run when it was expanded, in bf_exec_
+    uint32_t exec_count = 0;
+    uint32_t state = 0;           // stored state: its parent's until expanded, then its own
+  };
+
+  void bf_store()
+  {
+    const size_t words = (state_.size() + 63) / 64;
+    const size_t at = bf_states_.size();
+    bf_states_.resize(at + words, 0);
+    for (size_t a = 0; a < state_.size(); ++a) {
+      if (state_[a]) {
+        bf_states_[at + a / 64] |= uint64_t{1} << (a % 64);
+      }
+    }
+    bf_hashes_.push_back(state_hash_);
+  }
+
+  void bf_load(uint32_t index)
+  {
+    const size_t words = (state_.size() + 63) / 64;
+    const size_t at = size_t{index} * words;
+    for (size_t a = 0; a < state_.size(); ++a) {
+      state_[a] = (bf_states_[at + a / 64] >> (a % 64)) & 1u;
+    }
+    state_hash_ = bf_hashes_[index];
+  }
+
+  // One successor of `node` per method of `task` that can be applied in the current state
+  void bf_successors(uint32_t node, uint32_t task, uint32_t cell, uint32_t below)
+  {
+    if (!evaluated_ || evaluated_hash_ != state_hash_) {
+      relaxed_->evaluate(state_);
+      work_ += relaxed_->operators() / 32 + 1;
+      evaluated_ = true;
+      evaluated_hash_ = state_hash_;
+      ++evaluations_;
+    }
+    // What waits below costs the same for every method; if some of it is impossible, so is this
+    uint64_t rest = 0;
+    uint32_t c = below;
+    for (int depth = 0; c != kNone && depth < 64; ++depth) {
+      const uint32_t cost = relaxed_->task(bf_cells_[c].task);
+      if (cost == Relaxed::kUnreached) {
+        return;
+      }
+      rest += cost;
+      c = bf_cells_[c].next;
+    }
+    const std::vector<uint32_t> & methods = task == kNone ? initial_ : methods_[task];
+    for (uint32_t m : methods) {
+      const tdg::Method & method = p_.methods[m];
+      if (method.has_precondition && std::none_of(method.precondition.begin(),
+        method.precondition.end(), [&](uint32_t a) {return holds(g_.actions[a].precondition);}))
+      {
+        continue;
+      }
+      if (!needs_hold(m)) {
+        continue;
+      }
+      const uint32_t cost = relaxed_->method(m);
+      if (cost == Relaxed::kUnreached) {
+        continue;
+      }
+      const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
+        order_[method.method];
+      BfNode child;
+      child.parent = node;
+      child.did_cell = cell;
+      child.did_method = m;
+      child.first_child = static_cast<uint32_t>(bf_cells_.size());
+      child.child_count = static_cast<uint32_t>(order.size());
+      child.state = bf_nodes_[node].state;
+      bf_cells_.resize(bf_cells_.size() + order.size());
+      uint32_t top = below;
+      for (size_t k = order.size(); k-- > 0; ) {
+        Cell & made = bf_cells_[child.first_child + k];
+        made.task = method.subtasks[order[k]];
+        made.next = top;
+        made.hash = mix((top == kNone ? 0x9e3779b97f4a7c15ull : bf_cells_[top].hash) ^
+            (uint64_t{made.task} + 0x632be59bd9b4e019ull));
+        top = child.first_child + static_cast<uint32_t>(k);
+      }
+      child.top = top;
+      bf_nodes_.push_back(child);
+      // Lowest cost first; among equals, the newest (it goes deeper)
+      const uint64_t h = std::min<uint64_t>(rest + cost, 0xffffffffull);
+      bf_open_.emplace_back((h << 32) | (0xffffffffull - bf_nodes_.size()),
+        static_cast<uint32_t>(bf_nodes_.size() - 1));
+      std::push_heap(bf_open_.begin(), bf_open_.end(), std::greater<>());
+    }
+  }
+
+  Outcome best_first(Result & result)
+  {
+    if (bf_nodes_.empty()) {
+      state_.assign(g_.atoms.size(), false);
+      state_hash_ = 0;
+      for (ground::AtomId a : g_.init_atoms) {
+        state_[a] = true;
+        state_hash_ ^= zobrist_[a];
+      }
+      bf_store();
+      bf_nodes_.push_back(BfNode{});
+      evaluated_ = false;
+      bf_successors(0, kNone, kNone, kNone);
+    }
+    while (!bf_open_.empty()) {
+      if ((budget_ != nullptr && budget_->exhausted()) || work_ >= limit_) {
+        return Outcome::OutOfBudget;
+      }
+      if (bf_states_.size() * sizeof(uint64_t) > (size_t{3} << 30)) {
+        best_first_over_ = true;  // out of room: the other searches go on
+        return Outcome::OutOfBudget;
+      }
+      std::pop_heap(bf_open_.begin(), bf_open_.end(), std::greater<>());
+      const uint32_t n = bf_open_.back().second;
+      bf_open_.pop_back();
+      ++expansions_;
+      ++work_;
+      bf_load(bf_nodes_[n].state);
+      evaluated_ = false;
+      // The actions at the top of the stack: no choice there
+      uint32_t top = bf_nodes_[n].top;
+      const uint32_t exec_start = static_cast<uint32_t>(bf_exec_.size());
+      bool dead = false;
+      while (top != kNone && !p_.tasks[bf_cells_[top].task].actions.empty()) {
+        const ground::Action * action = nullptr;
+        for (uint32_t a : p_.tasks[bf_cells_[top].task].actions) {
+          if (holds(g_.actions[a].precondition)) {
+            action = &g_.actions[a];
+            break;
+          }
+        }
+        if (action == nullptr) {
+          dead = true;
+          break;
+        }
+        apply(*action);
+        bf_exec_.push_back(top);
+        top = bf_cells_[top].next;
+        ++work_;
+      }
+      trail_.clear();
+      if (dead) {
+        bf_exec_.resize(exec_start);
+        continue;
+      }
+      bf_nodes_[n].exec_start = exec_start;
+      bf_nodes_[n].exec_count = static_cast<uint32_t>(bf_exec_.size()) - exec_start;
+      if (top == kNone) {
+        if (holds(g_.goal)) {
+          result.plan = bf_plan(n);
+          return Outcome::Solved;
+        }
+        continue;
+      }
+      if (!bf_seen_.insert(mix(state_hash_ ^ bf_cells_[top].hash)).second) {
+        continue;
+      }
+      bf_nodes_[n].state = static_cast<uint32_t>(bf_hashes_.size());
+      bf_store();
+      bf_successors(n, bf_cells_[top].task, top, bf_cells_[top].next);
+    }
+    return Outcome::Unsolvable;
+  }
+
+  // The plan of the path that ends in `goal`, without the tasks added by parameter splitting
+  std::string bf_plan(uint32_t goal) const
+  {
+    std::vector<uint32_t> path;
+    for (uint32_t n = goal; n != kNone; n = bf_nodes_[n].parent) {
+      path.push_back(n);
+    }
+    std::reverse(path.begin(), path.end());
+    auto text = [&](uint32_t cell) {return std::to_string(cell + 1);};
+    auto artificial_cell = [&](uint32_t cell) {
+        return m_.tasks[p_.tasks[bf_cells_[cell].task].task].artificial;
+      };
+    std::unordered_map<uint32_t, uint32_t> only_child;  // of the cells added by splitting
+    for (uint32_t n : path) {
+      const BfNode & node = bf_nodes_[n];
+      if (node.did_cell != kNone && artificial_cell(node.did_cell)) {
+        only_child[node.did_cell] = node.first_child;
+      }
+    }
+    auto real = [&](uint32_t cell) {
+        while (artificial_cell(cell)) {
+          cell = only_child.at(cell);
+        }
+        return cell;
+      };
+    std::string actions = "==>\n";
+    std::string roots = "root";
+    std::string tree;
+    size_t steps = 0;
+    for (uint32_t n : path) {
+      const BfNode & node = bf_nodes_[n];
+      if (node.did_method != kNone) {
+        std::string children;
+        for (uint32_t k = 0; k < node.child_count; ++k) {
+          children += " " + text(real(node.first_child + k));
+        }
+        if (node.did_cell == kNone) {
+          roots += children;
+        } else if (!artificial_cell(node.did_cell)) {
+          tree += text(node.did_cell) + " " + name(bf_cells_[node.did_cell].task) + " -> " +
+            m_.methods[p_.methods[node.did_method].method].name + children + "\n";
+        }
+      }
+      for (uint32_t k = 0; k < node.exec_count; ++k) {
+        const uint32_t cell = bf_exec_[node.exec_start + k];
+        actions += text(cell) + " " + name(bf_cells_[cell].task) + "\n";
+        ++steps;
+      }
+    }
+    bf_steps_ = steps;
+    return actions + roots + "\n" + tree + "<==\n";
+  }
+
   // The methods of a task that can be applied now, most promising first: by their cost in the
   // relaxed problem from the current state, leaving out those impossible even there
   std::vector<uint32_t> candidates(uint32_t task)
@@ -1109,6 +1363,15 @@ private:
   bool evaluated_ = false;            // relaxed_ holds the costs from evaluated_hash_
   uint64_t evaluated_hash_ = 0;
   uint64_t evaluations_ = 0;
+  std::vector<Cell> bf_cells_;
+  std::vector<BfNode> bf_nodes_;
+  std::vector<uint32_t> bf_exec_;
+  std::vector<uint64_t> bf_states_;
+  std::vector<uint64_t> bf_hashes_;
+  std::vector<std::pair<uint64_t, uint32_t>> bf_open_;
+  std::unordered_set<uint64_t> bf_seen_;
+  bool best_first_over_ = false;
+  mutable size_t bf_steps_ = 0;
   bool guided_ = true;               // this turn ranks the methods with relaxed_
   uint64_t work_ = 0;                // expansions, plus the cost of the evaluations
   uint64_t limit_ = ~uint64_t{0};    // work at which this turn ends

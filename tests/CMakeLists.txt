@@ -86,6 +86,6 @@ if(KLIMAX_BUILD_CLI)
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.hddl 0
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.plan)
   set_tests_properties(cli_ground PROPERTIES
-    PASS_REGULAR_EXPRESSION "facts 24, actions 38, abstract tasks 26, methods 93"
+    PASS_REGULAR_EXPRESSION "facts 20, actions 30, abstract tasks 18, methods 77"
     FAIL_REGULAR_EXPRESSION "not in the ground problem")
 endif()

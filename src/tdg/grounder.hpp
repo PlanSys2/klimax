@@ -83,14 +83,16 @@ struct Problem
  * @brief Grounds a checked model.
  *
  * - Parameters that only one subtask of a method uses are split off (hddl/split.hpp).
- * - Kairos grounds the actions and the method preconditions (as actions with no effect) by
- *   relaxed reachability, ignoring the hierarchy: a superset of what any plan can use.
- * - Top-down, which tasks the initial network can ask for, with the arguments known at that
- *   point; and only for those:
- * - Bottom-up, in Datalog (Kairos' engine): a method instance is derivable when its
- *   precondition is reachable and its subtasks are derivable; an abstract task, when some method
- *   of it is. So every instance kept can be decomposed into reachable actions.
- * - From the initial task network down, only what it reaches through derivable instances is kept.
+ * - One Datalog program (Kairos' engine) computes together, so that each part limits the others:
+ *   which tasks the initial network can ask for, top-down, with the arguments known at that
+ *   point; which action instances are asked for and have their positive preconditions reachable;
+ *   the facts those actions add; and which method instances and tasks can be decomposed into
+ *   such actions, bottom-up. An action that no task asks for adds nothing: the reachability is
+ *   that of the hierarchy, not that of the actions alone.
+ * - Kairos then grounds exactly the action instances derived (and the method preconditions, as
+ *   actions with no effect), and what the initial network reaches through them is kept.
+ *
+ * `unsolvable` is a proof: the relaxation only ever adds possibilities.
  *
  * Error "ground.budget" when the budget runs out.
  */

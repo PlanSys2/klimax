@@ -198,13 +198,13 @@ Detalle de H1:
 - ✅ Modelo: tareas, métodos, redes de tareas, restricciones de variables; nombres, aridades,
   tipos y ciclos de orden comprobados.
 - ✅ Lee los 1044 problemas del banco del IPC 2023.
-- 🔄 Grounding con grafo de descomposición de tareas (`klimax --ground`), en Datalog sobre el
-  motor de Kairos: hacia abajo, qué tareas puede pedir la red inicial; hacia arriba, cuáles son
-  descomponibles en acciones alcanzables; y con separación de parámetros (las elecciones
-  independientes de un método no se multiplican). Instancia 944 de los 1044 problemas en menos de
-  10 s (mediana 26 ms) y contiene los 530 planes válidos conocidos. Faltan 100, casi todos
-  porque la alcanzabilidad de Kairos ignora la jerarquía y genera millones de acciones que nadie
-  pide (Snake, Minecraft, Woodworking de orden total, SharpSAT, Hiking).
+- 🔄 Grounding con grafo de descomposición de tareas (`klimax --ground`): un único programa
+  Datalog (motor de Kairos) calcula a la vez qué tareas puede pedir la red inicial, qué acciones
+  pedidas son alcanzables, qué hechos añaden y qué métodos son descomponibles; Kairos instancia
+  después solo esas acciones. Con separación de parámetros. Resuelve 965 de los 1044 problemas en
+  menos de 10 s (mediana 14 ms; 884 en menos de 1 s), contiene los 530 planes válidos conocidos y
+  demuestra sin solución 3 problemas de Minecraft-Player. Faltan 79 (Snake 24, Minecraft 24,
+  Freecell 18, SharpSAT 7, Hiking 5, Satellite 1).
 - ✅ Lee los 1116 problemas del banco del IPC 2020.
 - ✅ Verificador de planes independiente de la búsqueda, contrastado con el del IPC: de acuerdo
   en 1568 planes reales y en 17 218 de 17 219 variaciones (la restante es un fallo del verificador

@@ -158,8 +158,8 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 | Fase | Estado | Contenido | Criterio de salida |
 |---|---|---|---|
 | H0 | ✅ | Semántica de HDDL 2.1 por escrito; decisión sobre `kairos::core`; infraestructura de medida con PANDA, Lilotane, HyperTensioN, Aries, SIADEX y PDDL4J instalados | Línea base reproducida frente a los resultados del IPC 2023 |
-| H1 | 🔄 | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
-| H2 | ⏳ | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
+| H1 | ✅ | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
+| H2 | 🔄 | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
 | H3 | ⏳ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
 | H3b | ⏳ | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
 | H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
@@ -198,13 +198,14 @@ Detalle de H1:
 - ✅ Modelo: tareas, métodos, redes de tareas, restricciones de variables; nombres, aridades,
   tipos y ciclos de orden comprobados.
 - ✅ Lee los 1044 problemas del banco del IPC 2023.
-- 🔄 Grounding con grafo de descomposición de tareas (`klimax --ground`): un único programa
+- ✅ Grounding con grafo de descomposición de tareas (`klimax --ground`): un único programa
   Datalog (motor de Kairos) calcula a la vez qué tareas puede pedir la red inicial, qué acciones
   pedidas son alcanzables, qué hechos añaden y qué métodos son descomponibles; Kairos instancia
-  después solo esas acciones. Con separación de parámetros. Resuelve 965 de los 1044 problemas en
-  menos de 10 s (mediana 14 ms; 884 en menos de 1 s), contiene los 530 planes válidos conocidos y
-  demuestra sin solución 3 problemas de Minecraft-Player. Faltan 79 (Snake 24, Minecraft 24,
-  Freecell 18, SharpSAT 7, Hiking 5, Satellite 1).
+  después solo las acciones que eso usa. Con separación de parámetros. En 10 s resuelve 1000 de
+  los 1044 problemas (992 instanciados, mediana 14 ms, 903 en menos de 1 s; 8 de Minecraft-Player
+  demostrados sin solución) y contiene los 530 planes válidos conocidos. Los 44 restantes (Snake
+  25, SharpSAT 7, Minecraft-Player 7, Hiking 5) tienen decenas de millones de instancias: son
+  para el motor lifted de H2.
 - ✅ Lee los 1116 problemas del banco del IPC 2020.
 - ✅ Verificador de planes independiente de la búsqueda, contrastado con el del IPC: de acuerdo
   en 1568 planes reales y en 17 218 de 17 219 variaciones (la restante es un fallo del verificador

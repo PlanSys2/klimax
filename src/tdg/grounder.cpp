@@ -141,7 +141,8 @@ public:
       if (!solved) {
         throw OutOfBudget{};
       }
-      // Kairos grounds only the action instances the hierarchy asks for
+      // Kairos grounds only the action instances that what the initial network reaches uses
+      collect();
       guard();
       kairos::ground::GroundOptions options;
       options.drop_useless_actions = false;  // the method preconditions are such actions
@@ -157,7 +158,7 @@ public:
           p_.pddl.atoms.size(), p_.stats.kairos_ms);
       }
       instances();
-      collect();
+      attach();
       prune();
       if (trace_) {
         std::fprintf(stderr, "collect: %zu tasks, %zu methods, %.0f ms\n", p_.tasks.size(),
@@ -260,6 +261,98 @@ private:
         datalog::Term::var(t.index) : datalog::Term::constant(t.index));
     }
     return true;
+  }
+
+  // Adds a rule as a chain of joins that starts at its first condition (what is asked for, when
+  // there is one) and takes next the condition that shares most variables with what is
+  // already joined. Left to itself the engine may start by crossing two unrelated tables.
+  void add_ordered(datalog::Rule rule)
+  {
+    if (rule.body.size() <= 2) {
+      prog_.add_rule(std::move(rule));
+      return;
+    }
+    const uint32_t n = rule.variables;
+    auto variables = [n](const datalog::Atom & a) {
+        std::vector<bool> v(n, false);
+        for (const datalog::Term & t : a.args) {
+          if (t.is_variable) {
+            v[t.value] = true;
+          }
+        }
+        return v;
+      };
+    std::vector<datalog::Atom> rest(rule.body.begin() + 1, rule.body.end());
+    std::vector<datalog::Check> checks = std::move(rule.checks);
+    datalog::Atom current = rule.body[0];
+    std::vector<bool> have = variables(current);
+    while (!rest.empty()) {
+      size_t best = 0;
+      int best_shared = -1;
+      for (size_t i = 0; i < rest.size(); ++i) {
+        int shared = 0;
+        for (const datalog::Term & t : rest[i].args) {
+          shared += t.is_variable && have[t.value] ? 1 : 0;
+        }
+        if (shared > best_shared) {
+          best_shared = shared;
+          best = i;
+        }
+      }
+      datalog::Atom next = std::move(rest[best]);
+      rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(best));
+      for (const datalog::Term & t : next.args) {
+        if (t.is_variable) {
+          have[t.value] = true;
+        }
+      }
+      datalog::Rule step;
+      step.variables = n;
+      step.body.push_back(std::move(current));
+      step.body.push_back(std::move(next));
+      // The checks whose variables are all joined by now
+      for (auto it = checks.begin(); it != checks.end(); ) {
+        if (std::all_of(it->variables.begin(), it->variables.end(),
+          [&](uint32_t v) {return have[v];}))
+        {
+          step.checks.push_back(std::move(*it));
+          it = checks.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      if (rest.empty()) {
+        step.head = rule.head;
+        prog_.add_rule(std::move(step));
+        return;
+      }
+      // What the rest of the chain still needs
+      std::vector<bool> later = variables(rule.head);
+      for (const datalog::Atom & a : rest) {
+        for (const datalog::Term & t : a.args) {
+          if (t.is_variable) {
+            later[t.value] = true;
+          }
+        }
+      }
+      for (const datalog::Check & c : checks) {
+        for (uint32_t v : c.variables) {
+          later[v] = true;
+        }
+      }
+      datalog::Atom partial;
+      for (uint32_t v = 0; v < n; ++v) {
+        if (have[v] && later[v]) {
+          partial.args.push_back(datalog::Term::var(v));
+        }
+      }
+      partial.predicate = prog_.add_predicate(
+        static_cast<uint32_t>(partial.args.size()), "part of " + prog_.name(rule.head.predicate));
+      step.head = partial;
+      prog_.add_rule(std::move(step));
+      current = std::move(partial);
+      have = variables(current);
+    }
   }
 
   static void mark(const datalog::Atom & a, std::vector<bool> & bound)
@@ -503,7 +596,7 @@ private:
       prog_.add_fact(act_[k], Row{});
       return;
     }
-    prog_.add_rule(std::move(rule));
+    add_ordered(std::move(rule));
   }
 
   // predicate(parameters) :- act(parameters, hidden), for every copy of the action
@@ -661,7 +754,7 @@ private:
         continue;
       }
       rule.body = std::move(body);
-      prog_.add_rule(std::move(rule));
+      add_ordered(std::move(rule));
     }
   }
 
@@ -744,13 +837,30 @@ private:
       prog_.add_fact(predicate, Row{});
       return;
     }
-    prog_.add_rule(std::move(rule));
+    add_ordered(std::move(rule));
   }
 
-  // Gives every action of the lifted task a static precondition that lists the instances
-  // derived, so that Kairos grounds those and no others
+  // Gives every action of the lifted task a static precondition that lists the instances used
+  // by what was collected, so that Kairos grounds those and no others
   void guard()
   {
+    std::map<std::string, std::unordered_set<Row, RowHash>> used;
+    for (const Task & t : p_.tasks) {
+      const hddl::TaskInfo & info = m_.tasks[t.task];
+      if (info.primitive && !info.durative) {
+        used[action_name(info.action)].insert(t.args);
+      }
+    }
+    for (const Method & method : p_.methods) {
+      if (method.has_precondition) {
+        const hddl::MethodInfo & info = m_.methods[method.method];
+        Row row;
+        for (uint32_t p : info.precondition_params) {
+          row.push_back(method.params[p]);
+        }
+        used[action_name(static_cast<uint32_t>(info.precondition_action))].insert(std::move(row));
+      }
+    }
     for (const auto & [name, copies] : copies_) {
       const Lifted & first = lifted_.actions[copies[0]];
       std::vector<sem::TypeSpec> types;
@@ -758,12 +868,7 @@ private:
         types.push_back(first.variables[v].types);
       }
       const sem::PredicateId needed = lifted_.add_predicate("klimax-needed " + name, false, types);
-      std::unordered_set<Row, RowHash> rows;
       for (uint32_t k : copies) {
-        for (uint32_t fact : prog_.facts(act_[k])) {
-          std::span<const uint32_t> args = prog_.args(fact);
-          rows.emplace(args.begin(), args.begin() + first.parameters);
-        }
         kairos::lifted::Literal literal;
         literal.atom.predicate = needed;
         for (uint32_t v = 0; v < first.parameters; ++v) {
@@ -771,13 +876,44 @@ private:
         }
         lifted_.actions[k].precondition.literals.push_back(std::move(literal));
       }
-      for (const Row & row : rows) {
+      for (const Row & row : used[name]) {
         tick();
         std::vector<sem::ObjectId> objects;
         for (uint32_t o : row) {
           objects.emplace_back(o);
         }
         lifted_.init_facts.emplace_back(needed, std::move(objects));
+      }
+    }
+  }
+
+  // Gives each primitive task and each method precondition its instances in Kairos' task
+  void attach()
+  {
+    for (Task & t : p_.tasks) {
+      const uint32_t schema = task_schema_[t.task.index()];
+      if (schema != kNone) {
+        auto found = instances_[schema].find(t.args);
+        if (found != instances_[schema].end()) {
+          t.actions = found->second;
+        }
+      }
+    }
+    for (Method & method : p_.methods) {
+      if (!method.has_precondition) {
+        continue;
+      }
+      const uint32_t schema = precondition_schema_[method.method];
+      if (schema == kNone) {
+        continue;
+      }
+      Row row;
+      for (uint32_t p : m_.methods[method.method].precondition_params) {
+        row.push_back(method.params[p]);
+      }
+      auto found = instances_[schema].find(row);
+      if (found != instances_[schema].end()) {
+        method.precondition = found->second;
       }
     }
   }
@@ -820,16 +956,7 @@ private:
       Task t;
       t.task = id;
       t.args = args;
-      const uint32_t schema = task_schema_[id.index()];
-      const hddl::TaskInfo & info = m_.tasks[id];
-      if (info.primitive && !info.durative) {
-        if (schema != kNone) {
-          auto found = instances_[schema].find(args);
-          if (found != instances_[schema].end()) {
-            t.actions = found->second;
-          }
-        }
-      } else {
+      if (is_abstract(id)) {
         queue_.push_back(it->second);
       }
       p_.tasks.push_back(std::move(t));
@@ -844,20 +971,7 @@ private:
     out.method = index;
     out.task = parent;
     out.params.assign(binding.begin(), binding.end());
-    if (index != kNone && precondition_predicate_[index] != kNone) {
-      out.has_precondition = true;
-      Row row;
-      for (uint32_t p : m_.methods[index].precondition_params) {
-        row.push_back(binding[p]);
-      }
-      const uint32_t schema = precondition_schema_[index];
-      if (schema != kNone) {
-        auto found = instances_[schema].find(row);
-        if (found != instances_[schema].end()) {
-          out.precondition = found->second;
-        }
-      }
-    }
+    out.has_precondition = index != kNone && precondition_predicate_[index] != kNone;
     for (const hddl::Step & step : net.steps) {
       Row args;
       for (const Arg & a : step.args) {

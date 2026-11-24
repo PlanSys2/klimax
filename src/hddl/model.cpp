@@ -82,11 +82,7 @@ public:
       return fail();
     }
 
-    // Kairos expects a goal: a problem without one gets the empty conjunction
     m_.has_goal = m_.problem.goal.valid();
-    if (!m_.has_goal) {
-      m_.problem.goal = m_.problem.nodes.formulas.push_back(ast::Formula{});
-    }
 
     m_.methods_of.assign(m_.tasks.size(), {});
     m_.total_order = !m_.has_htn || m_.initial.total_order;

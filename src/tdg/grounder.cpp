@@ -28,6 +28,7 @@
 
 #include "ground/datalog.hpp"
 #include "ground/grounder.hpp"
+#include "hddl/split.hpp"
 #include "normalize/normalizer.hpp"
 
 namespace klimax::tdg
@@ -64,7 +65,10 @@ class Grounder
 {
 public:
   Grounder(const Model & model, kairos::Budget * budget)
-  : m_(model), budget_(budget) {}
+  : owned_(model), m_(owned_), budget_(budget)
+  {
+    split_ = hddl::split_parameters(owned_);
+  }
 
   kairos::Result<Problem> run()
   {
@@ -95,11 +99,14 @@ public:
         std::fprintf(stderr, "datalog: %zu facts, %zu rules, %zu probes, %.0f ms%s\n",
           prog_.stats().facts, prog_.stats().rules, prog_.stats().join_probes,
           p_.stats.datalog_ms, solved ? "" : " (out of budget)");
-        for (uint32_t i = 0; i < m_.methods.size(); ++i) {
-          if (prog_.facts(method_predicate_[i]).size() > 20000) {
-            std::fprintf(stderr, "  %s: %zu instances\n", m_.methods[i].name.c_str(),
-              prog_.facts(method_predicate_[i]).size());
-          }
+        std::vector<std::pair<size_t, uint32_t>> sizes;
+        for (uint32_t q = 0; q < prog_.predicates(); ++q) {
+          sizes.emplace_back(prog_.facts(q).size(), q);
+        }
+        std::sort(sizes.rbegin(), sizes.rend());
+        for (size_t i = 0; i < sizes.size() && i < 6 && sizes[i].first > 20000; ++i) {
+          std::fprintf(stderr, "  %s/%u: %zu facts\n", prog_.name(sizes[i].second).c_str(),
+            prog_.arity(sizes[i].second), sizes[i].first);
         }
       }
       if (!solved) {
@@ -117,6 +124,8 @@ public:
     }
     p_.stats.milliseconds = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - start).count();
+    p_.stats.split_subtasks = split_;
+    p_.model = std::move(owned_);
     return kairos::Result<Problem>::success(std::move(p_));
   }
 
@@ -188,7 +197,8 @@ private:
       instances_[p_.pddl.actions[a].schema][row].push_back(a);
     }
     auto relation = [&](kairos::Symbol name, size_t arity, uint32_t & schema) {
-        const uint32_t predicate = prog_.add_predicate(static_cast<uint32_t>(arity));
+        const uint32_t predicate = prog_.add_predicate(
+          static_cast<uint32_t>(arity), std::string(m_.pddl.symbols.name(name)));
         auto it = schema_by_name.find(std::string(m_.pddl.symbols.name(name)));
         schema = it == schema_by_name.end() ? kNone : it->second;
         if (schema != kNone) {
@@ -221,16 +231,18 @@ private:
     for (uint32_t t = 0; t < m_.tasks.size(); ++t) {
       const hddl::TaskInfo & info = m_.tasks[TaskId(t)];
       if (!info.primitive || info.durative) {
-        task_predicate_[t] = prog_.add_predicate(static_cast<uint32_t>(info.params.size()));
+        task_predicate_[t] = prog_.add_predicate(
+          static_cast<uint32_t>(info.params.size()), "task " + info.name);
       }
     }
     // Rules. Only what the initial network can ask for is derived: need(task, bound arguments)
     // goes down from it, and a method instance is derived only for a needed task.
     for (const hddl::MethodInfo & method : m_.methods) {
-      method_predicate_.push_back(
-        prog_.add_predicate(static_cast<uint32_t>(method.params.size())));
+      method_predicate_.push_back(prog_.add_predicate(
+          static_cast<uint32_t>(method.params.size()), "method " + method.name));
     }
-    initial_predicate_ = prog_.add_predicate(static_cast<uint32_t>(m_.initial_params.size()));
+    initial_predicate_ = prog_.add_predicate(
+      static_cast<uint32_t>(m_.initial_params.size()), "initial");
     instance_rule(initial_predicate_, m_.initial_params, m_.initial, nullptr, kNone, {});
     needs_below(m_.initial_params, m_.initial, nullptr, kNone, {});
     while (!pending_.empty()) {
@@ -283,10 +295,12 @@ private:
     const datalog::Atom * needed, uint32_t precondition,
     const std::vector<uint32_t> & precondition_params)
   {
-    std::vector<datalog::Atom> body;
-    std::vector<bool> bound(params.size(), false);
+    // What can give values before the subtask is decomposed: the task asked for and the
+    // precondition, always; an action, only if it shares a variable with the subtask (the
+    // others would only multiply the cases)
+    std::vector<datalog::Atom> always;
     if (needed != nullptr) {
-      body.push_back(*needed);
+      always.push_back(*needed);
     }
     if (precondition != kNone) {
       datalog::Atom a;
@@ -294,23 +308,33 @@ private:
       for (uint32_t p : precondition_params) {
         a.args.push_back(datalog::Term::var(p));
       }
-      body.push_back(std::move(a));
-    }
-    for (const hddl::Step & step : net.steps) {
-      if (!is_abstract(step.task)) {
-        body.push_back(atom(task_predicate_[step.task.index()], step.args));
-      }
-    }
-    for (const datalog::Atom & a : body) {
-      for (const datalog::Term & t : a.args) {
-        if (t.is_variable) {
-          bound[t.value] = true;
-        }
-      }
+      always.push_back(std::move(a));
     }
     for (const hddl::Step & step : net.steps) {
       if (!is_abstract(step.task)) {
         continue;
+      }
+      std::vector<bool> mine(params.size(), false);
+      for (const Arg & a : step.args) {
+        if (a.variable) {
+          mine[a.index] = true;
+        }
+      }
+      std::vector<datalog::Atom> body = always;
+      for (const hddl::Step & other : net.steps) {
+        if (!is_abstract(other.task) && std::any_of(other.args.begin(), other.args.end(),
+          [&](const Arg & a) {return a.variable && mine[a.index];}))
+        {
+          body.push_back(atom(task_predicate_[other.task.index()], other.args));
+        }
+      }
+      std::vector<bool> bound(params.size(), false);
+      for (const datalog::Atom & a : body) {
+        for (const datalog::Term & t : a.args) {
+          if (t.is_variable) {
+            bound[t.value] = true;
+          }
+        }
       }
       uint64_t mask = 0;
       datalog::Rule rule;
@@ -326,7 +350,8 @@ private:
       auto [it, fresh] = need_predicate_.emplace(
         std::make_pair(step.task.value(), mask), 0);
       if (fresh) {
-        it->second = prog_.add_predicate(static_cast<uint32_t>(rule.head.args.size()));
+        it->second = prog_.add_predicate(static_cast<uint32_t>(rule.head.args.size()),
+            "need " + m_.tasks[step.task].name);
         pending_.emplace_back(step.task.value(), mask);
       }
       rule.head.predicate = it->second;
@@ -339,7 +364,7 @@ private:
         prog_.add_fact(it->second, constants);
         continue;
       }
-      rule.body = body;
+      rule.body = std::move(body);
       prog_.add_rule(std::move(rule));
     }
   }
@@ -535,7 +560,9 @@ private:
     }
   }
 
+  Model owned_;       // the model given, with parameters split
   const Model & m_;
+  size_t split_ = 0;
   kairos::Budget * budget_;
   bool trace_ = std::getenv("KLIMAX_TRACE_GROUND") != nullptr;  // sizes and times to stderr
   Problem p_;

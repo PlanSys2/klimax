@@ -100,6 +100,43 @@ TEST(GrounderTest, InitialParameters)
   EXPECT_EQ(p.tasks.size() - p.primitive_tasks, 3u);
 }
 
+// (visit ?x) and (visit ?y) are independent choices: with the parameters split, a method
+// instance per choice and not per pair
+TEST(GrounderTest, IndependentParametersDoNotMultiply)
+{
+  const char * domain =
+    "(define (domain d) (:requirements :typing :hierarchy) (:types room)\n"
+    " (:predicates (seen ?l - room))\n"
+    " (:task tour :parameters ()) (:task visit :parameters (?l - room))\n"
+    " (:method two :parameters (?x ?y - room) :task (tour)\n"
+    "  :ordered-subtasks (and (visit ?x) (visit ?y)))\n"
+    " (:method look :parameters (?l - room) :task (visit ?l) :ordered-subtasks (see ?l))\n"
+    " (:action see :parameters (?l - room) :effect (seen ?l)))";
+  std::string objects;
+  for (int i = 0; i < 30; ++i) {
+    objects += " r" + std::to_string(i);
+  }
+  auto d = hddl::parse_domain(domain, "d.hddl");
+  auto p = hddl::parse_problem("(define (problem p) (:domain d) (:objects" + objects +
+      " - room) (:htn :subtasks (tour)) (:init))", "p.hddl");
+  ASSERT_TRUE(d.ok() && p.ok());
+  auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+  ASSERT_TRUE(m.ok());
+  auto g = ground(m.value());
+  ASSERT_TRUE(g.ok());
+  EXPECT_EQ(g->stats.split_subtasks, 2u);
+  // initial, two, 30 choices for each of the two subtasks, 30 look: not 900 instances of two
+  EXPECT_EQ(g->methods.size(), 1u + 1u + 30u + 30u + 30u);
+  size_t artificial = 0;
+  for (const Method & method : g->methods) {
+    artificial += method.method != kNone && g->model.methods[method.method].artificial ? 1u : 0u;
+  }
+  EXPECT_EQ(artificial, 60u);
+  // The model given is untouched
+  EXPECT_EQ(m->methods.size(), 2u);
+  EXPECT_EQ(m->methods[0].params.size(), 2u);
+}
+
 TEST(GrounderTest, Budget)
 {
   auto d = hddl::parse_domain(kDomain, "d.hddl");

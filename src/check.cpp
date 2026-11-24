@@ -182,7 +182,7 @@ GroundResult ground(
   result.methods = ground->methods.size();
   result.milliseconds = ground->stats.milliseconds;
   if (!plan.empty()) {
-    result.missing = first_missing(model.value(), ground.value(), plan);
+    result.missing = first_missing(ground->model, ground.value(), plan);
   }
   return result;
 }

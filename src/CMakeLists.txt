@@ -22,6 +22,7 @@ add_library(klimax_objects OBJECT
   check.cpp
   hddl/model.cpp
   hddl/parser.cpp
+  hddl/split.cpp
   tdg/grounder.cpp
   verify/verifier.cpp
   version.cpp)

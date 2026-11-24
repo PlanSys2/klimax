@@ -54,6 +54,7 @@ struct Method
 
 struct Stats
 {
+  size_t split_subtasks = 0;   // subtasks moved by parameter splitting
   size_t kairos_actions = 0;   // action instances reachable ignoring the hierarchy
   size_t tasks_built = 0;      // derivable, before keeping what the initial network reaches
   size_t methods_built = 0;
@@ -68,6 +69,7 @@ struct Stats
  */
 struct Problem
 {
+  hddl::Model model;  // the model that was grounded: the one given, with parameters split
   kairos::ground::Task pddl;
   std::vector<Task> tasks;
   std::vector<Method> methods;
@@ -80,6 +82,7 @@ struct Problem
 /**
  * @brief Grounds a checked model.
  *
+ * - Parameters that only one subtask of a method uses are split off (hddl/split.hpp).
  * - Kairos grounds the actions and the method preconditions (as actions with no effect) by
  *   relaxed reachability, ignoring the hierarchy: a superset of what any plan can use.
  * - Top-down, which tasks the initial network can ask for, with the arguments known at that

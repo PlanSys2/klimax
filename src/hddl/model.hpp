@@ -53,6 +53,7 @@ struct TaskInfo
   bool durative = false;  // primitive only
   uint32_t action = 0;    // primitive: index in pddl.actions or pddl.durative_actions
   ast::Loc loc;
+  bool artificial = false;  // added by parameter splitting: not part of a plan
 };
 
 struct Step
@@ -104,6 +105,7 @@ struct MethodInfo
   int32_t precondition_action = -1;
   // The parameters of that action: those the precondition mentions, as positions in `params`
   std::vector<uint32_t> precondition_params;
+  bool artificial = false;  // added by parameter splitting: not part of a plan
   Network network;
   ast::Loc loc;
 };
@@ -121,7 +123,7 @@ struct Model
   std::vector<std::vector<uint32_t>> methods_of;  // by abstract TaskId value
 
   bool has_htn = false;  // false: a classical problem (a goal and no :htn)
-  bool has_goal = false;  // the problem states one; otherwise `problem.goal` is an empty (and)
+  bool has_goal = false;  // the problem states one
   std::vector<Param> initial_params;
   Network initial;
 

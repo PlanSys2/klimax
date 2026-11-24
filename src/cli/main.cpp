@@ -27,9 +27,11 @@ namespace
 void print_usage(std::ostream & out)
 {
   out << "Usage: klimax --check DOMAIN PROBLEM\n"
+      << "       klimax --verify DOMAIN PROBLEM PLAN\n"
       << "       klimax --version | --help\n"
       << "Klimax, an HTN planner for HDDL 2.1. Planning is not implemented yet.\n"
-      << "  --check   read the domain and the problem and report every error\n";
+      << "  --check   read the domain and the problem and report every error\n"
+      << "  --verify  check a plan in the format of the IPC HTN tracks\n";
 }
 
 std::optional<std::string> read_file(const char * path)
@@ -65,6 +67,29 @@ int check(const char * domain_path, const char * problem_path)
   return 0;
 }
 
+// Exit codes: 0 valid plan, 1 invalid plan or errors in the input, 2 bad usage
+int verify(const char * domain_path, const char * problem_path, const char * plan_path)
+{
+  auto domain = read_file(domain_path);
+  auto problem = read_file(problem_path);
+  auto plan = read_file(plan_path);
+  if (!domain || !problem || !plan) {
+    return 2;
+  }
+  klimax::VerifyResult r = klimax::verify(*domain, *problem, *plan, domain_path, problem_path);
+  for (const klimax::Diagnostic & d : r.diagnostics) {
+    if (d.severity == klimax::Severity::Error) {
+      std::cerr << d.rendered << "\n";
+    }
+  }
+  if (!r.valid) {
+    std::cout << "Plan verification result: false\n" << r.reason << "\n";
+    return 1;
+  }
+  std::cout << "Plan verification result: true\n";
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char ** argv)
@@ -82,6 +107,13 @@ int main(int argc, char ** argv)
         return 2;
       }
       return check(argv[i + 1], argv[i + 2]);
+    }
+    if (arg == "--verify") {
+      if (i + 4 != argc) {
+        std::cerr << "klimax: --verify takes a domain, a problem and a plan\n";
+        return 2;
+      }
+      return verify(argv[i + 1], argv[i + 2], argv[i + 3]);
     }
     if (arg == "--help" || arg == "-h") {
       print_usage(std::cout);

@@ -60,10 +60,12 @@ A solution is a sequence of ground actions together with a decomposition tree su
    subtask `a` before subtask `b`, every leaf below `a` comes before every leaf below `b`.
 3. The sequence is executable from the initial state, and the state goal, if any, holds at the end.
 4. Variable constraints hold for the bindings chosen.
-5. **Method precondition**: it holds in the state just before the first leaf below that method
-   occurrence. This is the semantics of the IPC verifier (a method precondition is compiled into
-   a primitive task ordered before all the subtasks). A method with no subtasks tests its
-   precondition at its own place in the sequence.
+5. **Method precondition**: it holds in some state before the first leaf below that method
+   occurrence, after everything the orderings place before the occurrence, and not before the
+   precondition of the method above it. This is the semantics of the IPC verifier (a method
+   precondition is a primitive task with no effect, ordered before all the subtasks). With a
+   total order that state is the one just before the first leaf. A method with no subtasks
+   tests its precondition at any point the orderings allow.
 
 **No task insertion**: the plan contains only leaves of the tree. **[decision]** A problem with a
 state goal and no `:htn` section is a PDDL problem; Klimax passes it to Kairos.
@@ -159,6 +161,8 @@ Anything outside this is an error with file, line and column, never a silent app
 
 - L1 and L2: the format of the IPC HTN tracks (`==>`, the numbered primitive plan, `root` and
   the decomposition lines), so that the IPC verifier can check Klimax's plans.
+  As that verifier requires, the subtask ids of a decomposition line, and those of `root`, are
+  written in an order the task network allows (each id after the ids ordered before it).
 - L3 and L4: **[decision]** the same format with a time and a duration for every primitive step
   (`time: (action args) [duration]`, as in PDDL 2.1 plans) and the same decomposition lines. No
   standard exists; this one keeps both the IPC HTN tools and the PDDL temporal validators usable
@@ -176,3 +180,26 @@ benchmark and the verifier as evidence:
 4. Where the numeric expressions of a method duration constraint are evaluated.
 5. A plan format for temporal hierarchical plans, and a verifier.
 6. Natural numbers against rationals for time (3.2, point 8).
+
+## 7. The plan verifier
+
+`klimax --verify DOMAIN PROBLEM PLAN` checks a plan against section 3.1. It interprets the syntax
+tree directly and shares no code with the search. It covers L1; a plan for anything else is
+reported as unsupported, never accepted.
+
+It was compared with the IPC verifier (`pandaPIparser -v`) on 1786 plans found by seven planners
+on the IPC 2023 benchmark and on 17222 variations of them, each with one change (two actions
+swapped or moved, an argument or a method replaced, a step removed, subtasks or roots
+reordered):
+
+| | Both accept | Both reject | Differ |
+|---|---|---|---|
+| Plans as found | 1565 | 3 | 0 |
+| Variations | 462 | 16756 | 1 |
+
+- The 3 plans both reject are Aries' invalid plans of the baseline.
+- 218 more plans (and 3 variations) are accepted only by the lenient mode of the IPC verifier,
+  because the planner changed the names: Klimax accepts the 59 that differ only in case (HDDL is
+  case-insensitive) and rejects the 159 with other characters replaced.
+- The one difference is a variation in which a method with one subtask is applied with none
+  (Rover, `m-navigate_abs-3`). The IPC verifier accepts it; Klimax rejects it.

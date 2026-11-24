@@ -19,6 +19,15 @@ grounder, heuristics, temporal network, validator).
 - [docs/plan.md](docs/plan.md): state of the art, design and phases.
 - [docs/baseline.md](docs/baseline.md): the existing HTN planners on the IPC 2023 benchmark.
 
+## Using
+
+Planning is not implemented yet. What works:
+
+```
+klimax --check DOMAIN PROBLEM          # read HDDL 1.0 and report every error
+klimax --verify DOMAIN PROBLEM PLAN    # check a plan in the format of the IPC HTN tracks
+```
+
 ## Building
 
 Klimax needs Kairos installed with its internal modules (`kairos::core`):

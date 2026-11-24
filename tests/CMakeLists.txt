@@ -38,6 +38,7 @@ endfunction()
 
 klimax_add_gtest(hddl_parser_test hddl/parser_test.cpp)
 klimax_add_gtest(hddl_model_test hddl/model_test.cpp)
+klimax_add_gtest(verifier_test hddl/verifier_test.cpp)
 
 if(KLIMAX_BUILD_CLI)
   add_test(NAME cli_version COMMAND klimax_cli --version)
@@ -57,4 +58,22 @@ if(KLIMAX_BUILD_CLI)
     PASS_REGULAR_EXPRESSION "actions 6, tasks 3, methods 6, objects 7, initial tasks 2, total order")
   add_test(NAME cli_check_missing_file COMMAND klimax_cli --check nowhere.hddl nowhere.hddl)
   set_tests_properties(cli_check_missing_file PROPERTIES WILL_FAIL ON)
+endif()
+
+if(KLIMAX_BUILD_CLI)
+  foreach(case p1-total-order p2-partial-order)
+    add_test(NAME cli_verify_${case} COMMAND klimax_cli --verify
+      ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+      ${CMAKE_CURRENT_SOURCE_DIR}/data/house/${case}.hddl
+      ${CMAKE_CURRENT_SOURCE_DIR}/data/house/${case}.plan)
+    set_tests_properties(cli_verify_${case} PROPERTIES
+      PASS_REGULAR_EXPRESSION "Plan verification result: true")
+  endforeach()
+  # A plan for another problem
+  add_test(NAME cli_verify_wrong_plan COMMAND klimax_cli --verify
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.plan)
+  set_tests_properties(cli_verify_wrong_plan PROPERTIES
+    PASS_REGULAR_EXPRESSION "Plan verification result: false")
 endif()

@@ -198,9 +198,11 @@ Detalle de H1:
 - ✅ Lee los 1044 problemas del banco del IPC 2023.
 - ⏳ Lee el banco del IPC 2020.
 - ⏳ Grounding con grafo de descomposición de tareas.
-- ⏳ Verificador de planes, contrastado con el del IPC sobre los planes de la línea base.
+- ✅ Verificador de planes independiente de la búsqueda, contrastado con el del IPC: de acuerdo
+  en 1568 planes reales y en 17 218 de 17 219 variaciones (la restante es un fallo del verificador
+  del IPC). Ver `docs/semantics.md`, sección 7.
 - ✅ `klimax --check` en el ejecutable.
-- ⏳ `klimax --verify` en el ejecutable.
+- ✅ `klimax --verify` en el ejecutable.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

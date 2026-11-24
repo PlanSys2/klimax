@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// \file
-/// \brief Reading and checking HDDL input.
+/// \brief Reading and checking HDDL input, and verifying plans.
 
 #ifndef KLIMAX__CHECK_HPP_
 #define KLIMAX__CHECK_HPP_
@@ -66,6 +66,24 @@ struct CheckResult
 /// @brief Reads an HDDL domain and problem and reports every error found.
 KLIMAX_API CheckResult check(
   std::string_view domain, std::string_view problem,
+  std::string_view domain_file = "domain.hddl", std::string_view problem_file = "problem.hddl");
+
+struct VerifyResult
+{
+  bool valid = false;
+  std::string reason;                   // why the plan is not valid, in one sentence
+  std::vector<Diagnostic> diagnostics;  // errors in the domain or the problem, if any
+};
+
+/**
+ * @brief Verifies a hierarchical plan in the format of the IPC HTN tracks: the primitive
+ * sequence and its decomposition tree, between "==>" and "<==".
+ *
+ * Independent of the planner. Sequential plans without numbers; anything else is reported as
+ * unsupported in `reason`, never accepted.
+ */
+KLIMAX_API VerifyResult verify(
+  std::string_view domain, std::string_view problem, std::string_view plan,
   std::string_view domain_file = "domain.hddl", std::string_view problem_file = "problem.hddl");
 
 }  // namespace klimax

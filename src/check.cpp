@@ -21,6 +21,7 @@
 #include "hddl/model.hpp"
 #include "hddl/parser.hpp"
 #include "kairos/diagnostics.hpp"
+#include "verify/verifier.hpp"
 
 namespace klimax
 {
@@ -79,6 +80,31 @@ CheckResult check(
   s.has_goal = model->problem.goal.valid();
   s.total_order = model->total_order;
   result.ok = true;
+  return result;
+}
+
+VerifyResult verify(
+  std::string_view domain, std::string_view problem, std::string_view plan,
+  std::string_view domain_file, std::string_view problem_file)
+{
+  VerifyResult result;
+  auto d = hddl::parse_domain(domain, domain_file);
+  append(result.diagnostics, d.diagnostics(), domain);
+  auto p = hddl::parse_problem(problem, problem_file);
+  append(result.diagnostics, p.diagnostics(), problem);
+  if (!d.ok() || !p.ok()) {
+    result.reason = "the domain or the problem has errors";
+    return result;
+  }
+  auto model = hddl::analyze(std::move(d).value(), std::move(p).value());
+  append(result.diagnostics, model.diagnostics(), "");
+  if (!model.ok()) {
+    result.reason = "the domain or the problem has errors";
+    return result;
+  }
+  verifier::Outcome outcome = verifier::verify(model.value(), plan);
+  result.valid = outcome.valid;
+  result.reason = std::move(outcome.reason);
   return result;
 }
 

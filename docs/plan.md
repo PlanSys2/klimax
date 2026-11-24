@@ -223,12 +223,27 @@ Detalle de H2:
   métodos (primero los más cortos) y acota la longitud del plan, con un tope que se dobla en
   cada vuelta. Los planes dejan de dar rodeos: frente a PandaDealer, la mediana de longitud en
   los 191 problemas que ambos resuelven es 1,00 (percentil 90: 1,49).
-- 🔄 Medida en el banco de orden total (761 problemas, planes verificados con el verificador del
-  IPC): 187 resueltos a 100 ms y 256 a 1 s. La línea base: a 100 ms el mejor es PandaDealer
-  lama con 162; a 1 s, PandaDealer con 318, Linear-Complex con 303 y HyperTensioN con 298.
-  Falta la medida a 30 s.
+- ✅ Precondiciones inferidas de las tareas (qué debe cumplirse al empezarlas, sea cual sea la
+  descomposición): descartan un método en cuanto alguna subtarea no podrá ejecutarse.
+- ✅ Heurística sobre el problema relajado (sin borrados y con cualquier acción permitida, costes
+  aditivos): ordena los métodos por lo que falta tras ejecutar sus primeras acciones, descarta
+  los imposibles y fija el tope inicial de longitud. Se alterna por turnos con la búsqueda en
+  orden fijo, porque cada una gana en dominios distintos.
+- 🔄 Medida en el banco de orden total (761 problemas, planes verificados):
+
+  | | 100 ms | 1 s | 30 s |
+  |---|---|---|---|
+  | Klimax, orden fijo | 198 | 264 | 330 |
+  | Klimax, con heurística por turnos | 195 | 292 | por medir |
+  | PandaDealer (mejor a 1 s y 30 s) | 155 | 318 | 494 |
+  | PandaDealer lama (mejor a 100 ms) | 162 | 308 | 494 |
+  | HyperTensioN | 52 | 298 | 332 |
+
+  Donde más falta: Multiarm-Blocksworld, Logistics, Blocksworld-HPDDL y Woodworking, en los que
+  la búsqueda en profundidad se compromete con una rama y no la suelta. Apunta a una búsqueda
+  primero-el-mejor con la misma heurística.
 - ⏳ Motor lifted para los 44 problemas que no se pueden instanciar.
-- ⏳ Heurística y búsqueda informada (enlaza con H4).
+- ⏳ Búsqueda primero-el-mejor con la heurística.
 - ⏳ Criterio de salida: cobertura ≥ PandaDealer a 1 s y 30 s (318 y 494 de 761).
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.

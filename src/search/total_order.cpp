@@ -16,7 +16,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <iterator>
+#include <memory>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
@@ -55,6 +57,7 @@ struct Node
 struct Choice
 {
   uint32_t top = kNone;     // the stack before decomposing
+  std::vector<uint32_t> candidates;  // ground methods to try, best first
   uint32_t next_method = 0;
   size_t cells = 0;
   size_t nodes = 0;
@@ -72,6 +75,165 @@ uint64_t mix(uint64_t x)
   x ^= x >> 33;
   return x;
 }
+
+// The problem without deletes and with any action allowed anywhere: a task is done by an action
+// of it, or by a method once its precondition and all its subtasks are. Additive costs from a
+// state (each action counts 1), computed by Dijkstra's algorithm over propositions (atoms and
+// "task done"). Infinite means impossible even so, hence impossible.
+class Relaxed
+{
+public:
+  static constexpr uint32_t kUnreached = 0x3fffffffu;
+
+  explicit Relaxed(const tdg::Problem & p)
+  : atoms_(static_cast<uint32_t>(p.pddl.atoms.size()))
+  {
+    const ground::Task & g = p.pddl;
+    auto begin = [&](uint32_t base) {
+        base_.push_back(base);
+        pre_start_.push_back(static_cast<uint32_t>(pre_.size()));
+        eff_start_.push_back(static_cast<uint32_t>(eff_.size()));
+      };
+    for (uint32_t t = 0; t < p.tasks.size(); ++t) {
+      for (uint32_t a : p.tasks[t].actions) {
+        const ground::Action & action = g.actions[a];
+        begin(1);
+        pre_.insert(pre_.end(), action.precondition.positive.begin(),
+          action.precondition.positive.end());
+        eff_.push_back(atoms_ + t);
+        eff_.insert(eff_.end(), action.changes.add.begin(), action.changes.add.end());
+        for (const ground::Effect & e : action.effects) {
+          if (e.kind == ground::Effect::Kind::Add) {
+            eff_.push_back(e.atom);  // whatever its condition
+          }
+        }
+      }
+    }
+    for (uint32_t m = 0; m < p.methods.size(); ++m) {
+      const tdg::Method & method = p.methods[m];
+      method_first_.push_back(static_cast<uint32_t>(base_.size()));
+      // One operator per instance of the precondition (one if it has none)
+      const size_t copies = method.has_precondition ? method.precondition.size() : 1;
+      for (size_t c = 0; c < copies; ++c) {
+        begin(0);
+        if (method.has_precondition) {
+          const ground::Condition & pre = g.actions[method.precondition[c]].precondition;
+          pre_.insert(pre_.end(), pre.positive.begin(), pre.positive.end());
+        }
+        for (uint32_t t : method.subtasks) {
+          pre_.push_back(atoms_ + t);
+        }
+        if (method.task != kNone) {
+          eff_.push_back(atoms_ + method.task);
+        }
+      }
+    }
+    method_first_.push_back(static_cast<uint32_t>(base_.size()));
+    pre_start_.push_back(static_cast<uint32_t>(pre_.size()));
+    eff_start_.push_back(static_cast<uint32_t>(eff_.size()));
+    // Which operators wait for each proposition (once per time they need it)
+    const uint32_t props = atoms_ + static_cast<uint32_t>(p.tasks.size());
+    user_start_.assign(props + 1, 0);
+    for (uint32_t x : pre_) {
+      ++user_start_[x + 1];
+    }
+    for (uint32_t x = 0; x < props; ++x) {
+      user_start_[x + 1] += user_start_[x];
+    }
+    users_.resize(pre_.size());
+    std::vector<uint32_t> at(user_start_.begin(), user_start_.end() - 1);
+    for (uint32_t op = 0; op < base_.size(); ++op) {
+      for (uint32_t i = pre_start_[op]; i < pre_start_[op + 1]; ++i) {
+        users_[at[pre_[i]]++] = op;
+      }
+    }
+    cost_.resize(props);
+    value_.resize(base_.size());
+    waiting_.resize(base_.size());
+  }
+
+  void evaluate(const std::vector<bool> & state)
+  {
+    std::fill(cost_.begin(), cost_.end(), kUnreached);
+    heap_.clear();
+    for (uint32_t op = 0; op < base_.size(); ++op) {
+      waiting_[op] = pre_start_[op + 1] - pre_start_[op];
+      value_[op] = base_[op];
+    }
+    for (uint32_t a = 0; a < atoms_; ++a) {
+      if (state[a]) {
+        cost_[a] = 0;
+        heap_.emplace_back(0, a);
+      }
+    }
+    for (uint32_t op = 0; op < base_.size(); ++op) {
+      if (waiting_[op] == 0) {
+        fire(op);
+      }
+    }
+    std::make_heap(heap_.begin(), heap_.end(), std::greater<>());
+    while (!heap_.empty()) {
+      std::pop_heap(heap_.begin(), heap_.end(), std::greater<>());
+      const auto [cost, x] = heap_.back();
+      heap_.pop_back();
+      if (cost != cost_[x]) {
+        continue;  // found cheaper since
+      }
+      for (uint32_t i = user_start_[x]; i < user_start_[x + 1]; ++i) {
+        const uint32_t op = users_[i];
+        value_[op] = std::min(kUnreached, value_[op] + cost);
+        if (--waiting_[op] == 0) {
+          fire(op);
+        }
+      }
+    }
+  }
+
+  // Cost of completing a method from the state evaluated; kUnreached if impossible
+  uint32_t method(uint32_t m) const
+  {
+    uint32_t best = kUnreached;
+    for (uint32_t op = method_first_[m]; op < method_first_[m + 1]; ++op) {
+      if (waiting_[op] == 0) {
+        best = std::min(best, value_[op]);
+      }
+    }
+    return best;
+  }
+
+  // Cost of getting a task done from the state evaluated
+  uint32_t task(uint32_t t) const {return cost_[atoms_ + t];}
+
+  size_t operators() const {return base_.size();}
+
+private:
+  void fire(uint32_t op)
+  {
+    const uint32_t cost = value_[op];
+    for (uint32_t i = eff_start_[op]; i < eff_start_[op + 1]; ++i) {
+      const uint32_t x = eff_[i];
+      if (cost < cost_[x]) {
+        cost_[x] = cost;
+        heap_.emplace_back(cost, x);
+        std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
+      }
+    }
+  }
+
+  uint32_t atoms_;
+  std::vector<uint32_t> base_;       // by operator: 1 for an action, 0 for a method
+  std::vector<uint32_t> pre_start_;
+  std::vector<uint32_t> pre_;
+  std::vector<uint32_t> eff_start_;
+  std::vector<uint32_t> eff_;
+  std::vector<uint32_t> method_first_;  // operators of each ground method
+  std::vector<uint32_t> user_start_;
+  std::vector<uint32_t> users_;
+  std::vector<uint32_t> cost_;       // by proposition
+  std::vector<uint32_t> value_;      // by operator: its cost so far
+  std::vector<uint32_t> waiting_;    // by operator: preconditions not reached yet
+  std::vector<std::pair<uint32_t, uint32_t>> heap_;
+};
 
 class Search
 {
@@ -105,6 +267,16 @@ public:
     lap("costs");
     infer();
     lap("infer");
+    if (std::getenv("KLIMAX_NO_HEURISTIC") == nullptr) {
+      relaxed_ = std::make_unique<Relaxed>(p_);
+      if (std::getenv("KLIMAX_TRACE_SEARCH") != nullptr) {
+        std::fprintf(stderr, "relaxed problem: %zu operators\n", relaxed_->operators());
+      }
+      if (relaxed_->operators() > kHeuristicLimit) {
+        relaxed_.reset();  // too large to evaluate at every decomposition
+      }
+    }
+    lap("relaxed");
     std::mt19937_64 random(20261124);
     for (size_t a = 0; a < g_.atoms.size(); ++a) {
       zobrist_.push_back(random());
@@ -116,24 +288,68 @@ public:
     for (uint32_t m : p_.initial) {
       least = std::min(least, method_cost_[m]);
     }
-    for (uint64_t bound = std::max<uint64_t>(least, 1); ; bound *= 2) {
-      const Outcome outcome = iteration(bound, result);
-      result.expansions = expansions_;
-      if (std::getenv("KLIMAX_TRACE_SEARCH") != nullptr) {
-        std::fprintf(stderr, "bound %llu: %s, %llu expansions so far%s\n",
-          static_cast<unsigned long long>(bound),
-          outcome == Outcome::Solved ? "solved" : outcome == Outcome::Unsolvable ? "nothing" :
-          "stopped", static_cast<unsigned long long>(expansions_), cut_ ? ", cut" : "");
+    uint64_t guided_bound = 0;
+    if (relaxed_ != nullptr) {
+      // The relaxed cost from the initial state says about how long the plan is: starting
+      // well below it only means searching every short non-plan first
+      std::vector<bool> initial(g_.atoms.size(), false);
+      for (ground::AtomId a : g_.init_atoms) {
+        initial[a] = true;
       }
-      if (outcome != Outcome::Unsolvable || !cut_) {
-        result.outcome = outcome;  // without cuts, the whole space was searched
+      relaxed_->evaluate(initial);
+      uint32_t estimate = Relaxed::kUnreached;
+      for (uint32_t m : p_.initial) {
+        estimate = std::min(estimate, relaxed_->method(m));
+      }
+      if (estimate == Relaxed::kUnreached) {
+        result.outcome = Outcome::Unsolvable;  // impossible even without deletes
         return result;
+      }
+      guided_bound = std::max<uint64_t>(std::max<uint64_t>(least, 1), uint64_t{estimate} * 2);
+    }
+    // Two ways of searching, each better on some domains: guided by the relaxed costs, and with
+    // the methods in their fixed order. They take turns, each turn with twice the work of
+    // the one before, so that the total is at most a few times what the better one needs.
+    const bool trace = std::getenv("KLIMAX_TRACE_SEARCH") != nullptr;
+    for (uint64_t turn = 4000; ; turn *= 2) {
+      for (const bool guided : {true, false}) {
+        if (guided && relaxed_ == nullptr) {
+          continue;
+        }
+        guided_ = guided;
+        limit_ = relaxed_ == nullptr ? ~uint64_t{0} : work_ + turn;
+        for (uint64_t bound = guided ? guided_bound : std::max<uint64_t>(least, 1); ;
+          bound *= 2)
+        {
+          const Outcome outcome = iteration(bound, result);
+          result.expansions = expansions_;
+          if (trace) {
+            std::fprintf(stderr, "%s, bound %llu: %s, %llu expansions so far%s\n",
+              guided ? "guided" : "fixed order", static_cast<unsigned long long>(bound),
+              outcome == Outcome::Solved ? "solved" : outcome == Outcome::Unsolvable ?
+              "nothing" : "stopped", static_cast<unsigned long long>(expansions_),
+              cut_ ? ", cut" : "");
+          }
+          if (outcome == Outcome::Solved || (outcome == Outcome::Unsolvable && !cut_)) {
+            result.outcome = outcome;  // without cuts, the whole space was searched
+            return result;
+          }
+          if (outcome == Outcome::OutOfBudget) {
+            if (budget_ != nullptr && budget_->exhausted()) {
+              result.outcome = outcome;
+              return result;
+            }
+            break;  // out of its turn: the other way now
+          }
+        }
       }
     }
   }
 
 private:
   static constexpr uint64_t kInfinite = ~uint64_t{0} / 4;
+  static constexpr size_t kLookAheadLimit = 20000;   // operators of the relaxed problem
+  static constexpr size_t kHeuristicLimit = 400000;
 
   Outcome iteration(uint64_t bound, Result & result)
   {
@@ -151,13 +367,14 @@ private:
     choices_.clear();
     choice_task_.clear();
     seen_.clear();
+    evaluated_ = false;
     top_ = kNone;
     // The ways of instantiating the initial network are the methods of a task above all
     nodes_.assign(1, Node{kNone, kNone, kNone});
     bool found = descend(kNone, 0, kNone, 0);
     while (found || backtrack()) {
       found = false;
-      if (budget_ != nullptr && budget_->exhausted()) {
+      if ((budget_ != nullptr && budget_->exhausted()) || work_ >= limit_) {
         return Outcome::OutOfBudget;
       }
       if (top_ == kNone) {
@@ -169,6 +386,7 @@ private:
         continue;  // every task done but the goal does not hold
       }
       ++expansions_;
+      ++work_;
       const Cell cell = cells_[top_];
       const tdg::Task & task = p_.tasks[cell.task];
       if (!task.actions.empty()) {
@@ -616,22 +834,121 @@ private:
     }
   }
 
-  // Replaces a task by the subtasks of its first applicable method from `from` on whose result
-  // was not seen before. `task` is kNone for the initial network.
-  bool descend(uint32_t task, uint32_t node, uint32_t below, uint32_t from)
+  // The methods of a task that can be applied now, most promising first: by their cost in the
+  // relaxed problem from the current state, leaving out those impossible even there
+  std::vector<uint32_t> candidates(uint32_t task)
   {
     const std::vector<uint32_t> & methods = task == kNone ? initial_ : methods_[task];
-    for (uint32_t i = from; i < methods.size(); ++i) {
-      const tdg::Method & method = p_.methods[methods[i]];
+    std::vector<uint32_t> out;
+    for (uint32_t m : methods) {
+      const tdg::Method & method = p_.methods[m];
       if (method.has_precondition && std::none_of(method.precondition.begin(),
         method.precondition.end(), [&](uint32_t a) {return holds(g_.actions[a].precondition);}))
       {
         continue;
       }
-      if (!needs_hold(methods[i])) {
+      if (!needs_hold(m)) {
         ++pruned_;
         continue;  // some subtask could never be executed
       }
+      out.push_back(m);
+    }
+    if (out.size() < 2 || relaxed_ == nullptr || !guided_) {
+      return out;
+    }
+    // Each method is judged after the actions it starts with: the state they leave, and from
+    // it the relaxed cost of the rest of its subtasks and of what waits in the stack. A method
+    // whose first actions cannot run, or that leaves something impossible, is dropped.
+    const uint32_t below = task == kNone ? kNone : cells_[top_].next;
+    // One evaluation costs time in proportion to the size of the problem: on a large one,
+    // every method is judged from the current state alone
+    const bool look_ahead = out.size() <= 24 && relaxed_->operators() <= kLookAheadLimit;
+    std::vector<std::pair<uint64_t, uint32_t>> ranked;
+    for (uint32_t m : out) {
+      const tdg::Method & method = p_.methods[m];
+      const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
+        order_[method.method];
+      const size_t mark = trail_.size();
+      const uint64_t hash = state_hash_;
+      size_t done = 0;
+      bool possible = true;
+      if (look_ahead) {
+        for (; done < order.size(); ++done) {
+          const tdg::Task & first = p_.tasks[method.subtasks[order[done]]];
+          if (first.actions.empty()) {
+            break;
+          }
+          const ground::Action * action = nullptr;
+          for (uint32_t a : first.actions) {
+            if (holds(g_.actions[a].precondition)) {
+              action = &g_.actions[a];
+              break;
+            }
+          }
+          if (action == nullptr) {
+            possible = false;
+            break;
+          }
+          apply(*action);
+        }
+      }
+      uint64_t cost = done;
+      if (possible) {
+        if (!evaluated_ || evaluated_hash_ != state_hash_) {
+          relaxed_->evaluate(state_);
+          work_ += relaxed_->operators() / 32 + 1;  // about what it costs, in expansions
+          evaluated_ = true;
+          evaluated_hash_ = state_hash_;
+          ++evaluations_;
+        }
+        for (size_t k = done; k < order.size() && possible; ++k) {
+          const uint32_t c = relaxed_->task(method.subtasks[order[k]]);
+          possible = c != Relaxed::kUnreached;
+          cost += c;
+        }
+        uint32_t cell = below;
+        for (int depth = 0; cell != kNone && depth < 64 && possible; ++depth) {
+          const uint32_t c = relaxed_->task(cells_[cell].task);
+          possible = c != Relaxed::kUnreached;
+          cost += c;
+          cell = cells_[cell].next;
+        }
+      }
+      while (trail_.size() > mark) {
+        const ground::AtomId a = trail_.back();
+        trail_.pop_back();
+        state_[a] = !state_[a];
+      }
+      state_hash_ = hash;
+      if (possible) {
+        ranked.emplace_back(cost, m);
+      } else {
+        ++pruned_;
+      }
+    }
+    std::stable_sort(ranked.begin(), ranked.end(), [](const auto & a, const auto & b) {
+        return a.first < b.first;
+      });
+    out.clear();
+    for (const auto & [cost, m] : ranked) {
+      out.push_back(m);
+    }
+    return out;
+  }
+
+  // Replaces a task by the subtasks of the first of its methods that leads somewhere not seen
+  // before. `task` is kNone for the initial network.
+  bool descend(uint32_t task, uint32_t node, uint32_t below, uint32_t from)
+  {
+    (void)from;
+    return try_from(task, node, below, candidates(task), 0);
+  }
+
+  bool try_from(
+    uint32_t task, uint32_t node, uint32_t below, std::vector<uint32_t> methods, uint32_t from)
+  {
+    for (uint32_t i = from; i < methods.size(); ++i) {
+      const tdg::Method & method = p_.methods[methods[i]];
       Choice choice;
       choice.top = top_;
       choice.next_method = i + 1;
@@ -679,7 +996,8 @@ private:
         continue;
       }
       nodes_[node].method = methods[i];
-      choices_.push_back(choice);
+      choice.candidates = std::move(methods);
+      choices_.push_back(std::move(choice));
       choice_task_.push_back({task, node});
       top_ = top;
       return true;
@@ -691,7 +1009,7 @@ private:
   bool backtrack()
   {
     while (!choices_.empty()) {
-      const Choice choice = choices_.back();
+      Choice choice = std::move(choices_.back());
       const auto [task, node] = choice_task_.back();
       choices_.pop_back();
       choice_task_.pop_back();
@@ -706,7 +1024,7 @@ private:
       executed_.resize(choice.executed);
       top_ = choice.top;
       const uint32_t below = task == kNone ? kNone : cells_[top_].next;
-      if (descend(task, node, below, choice.next_method)) {
+      if (try_from(task, node, below, std::move(choice.candidates), choice.next_method)) {
         return true;
       }
     }
@@ -787,6 +1105,13 @@ private:
   std::vector<uint32_t> initial_;
   std::vector<std::vector<uint32_t>> method_needs_;  // by ground method; empty: not inferred
   uint64_t pruned_ = 0;
+  std::unique_ptr<Relaxed> relaxed_;  // null: methods in their fixed order
+  bool evaluated_ = false;            // relaxed_ holds the costs from evaluated_hash_
+  uint64_t evaluated_hash_ = 0;
+  uint64_t evaluations_ = 0;
+  bool guided_ = true;               // this turn ranks the methods with relaxed_
+  uint64_t work_ = 0;                // expansions, plus the cost of the evaluations
+  uint64_t limit_ = ~uint64_t{0};    // work at which this turn ends
   uint64_t bound_ = 0;
   bool cut_ = false;  // some branch was cut by the bound in this iteration
   uint64_t expansions_ = 0;

@@ -18,6 +18,7 @@
 #ifndef KLIMAX__KLIMAX_HPP_
 #define KLIMAX__KLIMAX_HPP_
 
+#include "klimax/check.hpp"
 #include "klimax/version.hpp"
 
 #endif  // KLIMAX__KLIMAX_HPP_

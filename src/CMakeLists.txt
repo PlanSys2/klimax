@@ -17,7 +17,22 @@ include(GenerateExportHeader)
 set(KLIMAX_GENERATED_INCLUDE_DIR ${PROJECT_BINARY_DIR}/include)
 
 # libklimax: Kairos' modules are linked inside it (static), so it has no runtime dependency
-add_library(klimax SHARED version.cpp)
+# The modules, compiled once: libklimax and the unit tests (which reach internal symbols) share them
+add_library(klimax_objects OBJECT
+  check.cpp
+  hddl/parser.cpp
+  version.cpp)
+set_target_properties(klimax_objects PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
+  POSITION_INDEPENDENT_CODE ON)
+target_compile_definitions(klimax_objects PRIVATE klimax_EXPORTS)
+target_include_directories(klimax_objects PUBLIC
+  ${PROJECT_SOURCE_DIR}/include ${KLIMAX_GENERATED_INCLUDE_DIR} ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(klimax_objects PUBLIC kairos::core)
+klimax_configure_target(klimax_objects)
+
+add_library(klimax SHARED $<TARGET_OBJECTS:klimax_objects>)
 add_library(klimax::klimax ALIAS klimax)
 
 generate_export_header(klimax

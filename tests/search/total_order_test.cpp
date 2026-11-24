@@ -240,6 +240,37 @@ TEST(TotalOrderTest, EveryModeAlone)
   }
 }
 
+// With either way of valuing what is left in each of the two best-first searches
+TEST(TotalOrderTest, SumsAndRelaxedPlans)
+{
+  const std::string text = problem("(:htn :ordered-subtasks (and (bring cup a) (bring book d)))");
+  for (const char * value : {"00", "01", "10", "11"}) {
+    setenv("KLIMAX_PLAN_COSTS", value, 1);
+    Solved s = solve(text);
+    unsetenv("KLIMAX_PLAN_COSTS");
+    ASSERT_EQ(s.result.outcome, Outcome::Solved) << value;
+    EXPECT_TRUE(s.verified) << value << ": " << s.why;
+    EXPECT_EQ(s.result.steps, 12u) << value;
+  }
+}
+
+// What the tours have seen is read by nothing that follows and is not in the goal: the states
+// they leave count as one when only that differs, and the proof that the goal cannot hold is
+// shorter for it
+TEST(TotalOrderTest, StatesThatDifferInWhatNothingReads)
+{
+  const std::string text = problem(
+    "(:htn :ordered-subtasks (and (tour r1) (tour r1) (tour r1) (bring cup a)))",
+    "(:goal (at r1 d))");
+  Solved with = solve(text);
+  setenv("KLIMAX_NO_RELEVANCE", "1", 1);
+  Solved without = solve(text);
+  unsetenv("KLIMAX_NO_RELEVANCE");
+  EXPECT_EQ(with.result.outcome, Outcome::Unsolvable);
+  EXPECT_EQ(without.result.outcome, Outcome::Unsolvable);
+  EXPECT_LT(with.result.expansions * 2, without.result.expansions);
+}
+
 TEST(TotalOrderTest, Budget)
 {
   auto d = hddl::parse_domain(kDomain, "d.hddl");

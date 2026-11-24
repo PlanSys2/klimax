@@ -15,6 +15,8 @@
 #include "search/total_order.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <iterator>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
@@ -90,8 +92,19 @@ public:
       result.message = "derived predicates, numbers or durative actions";
       return result;
     }
+    const auto t0 = std::chrono::steady_clock::now();
+    auto lap = [&](const char * what) {
+        if (std::getenv("KLIMAX_TRACE_SEARCH") != nullptr) {
+          std::fprintf(stderr, "%s: %.0f ms\n", what, std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - t0).count());
+        }
+      };
     orders();
+    lap("orders");
     costs();
+    lap("costs");
+    infer();
+    lap("infer");
     std::mt19937_64 random(20261124);
     for (size_t a = 0; a < g_.atoms.size(); ++a) {
       zobrist_.push_back(random());
@@ -221,6 +234,302 @@ private:
     initial_ = sorted(p_.initial);
   }
 
+  // What must hold when a task starts, whatever its decomposition, as literals (atom * 2, plus
+  // 1 if it must be false). For an action, its precondition. For a method, its precondition,
+  // what its first subtask needs, and what a later subtask needs that no earlier one can bring
+  // about. For an abstract task, what all its methods need. A method whose needs do not hold
+  // cannot be completed, so it is not tried.
+  void infer()
+  {
+    const size_t nt = p_.tasks.size();
+    const size_t nm = p_.methods.size();
+    if (nm > 400000) {
+      return;  // too large for the tables: searched without them
+    }
+    auto literals = [&](const std::vector<uint32_t> & actions) {
+        // Common to every instance (they differ when a disjunction was split)
+        std::vector<uint32_t> common;
+        bool first = true;
+        for (uint32_t a : actions) {
+          std::vector<uint32_t> mine;
+          for (ground::AtomId x : g_.actions[a].precondition.positive) {
+            mine.push_back(x * 2);
+          }
+          for (ground::AtomId x : g_.actions[a].precondition.negative) {
+            mine.push_back(x * 2 + 1);
+          }
+          std::sort(mine.begin(), mine.end());
+          mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
+          if (first) {
+            common = std::move(mine);
+            first = false;
+          } else {
+            std::vector<uint32_t> both;
+            std::set_intersection(common.begin(), common.end(), mine.begin(), mine.end(),
+              std::back_inserter(both));
+            common = std::move(both);
+          }
+        }
+        return common;
+      };
+    // What each task may make true or false, through any decomposition (least fixpoint)
+    std::vector<std::vector<uint32_t>> may(nt);  // atom * 2 if it may add it, + 1 if delete
+    for (size_t t = 0; t < nt; ++t) {
+      for (uint32_t a : p_.tasks[t].actions) {
+        const ground::Action & action = g_.actions[a];
+        for (ground::AtomId x : action.changes.add) {
+          may[t].push_back(x * 2);
+        }
+        for (ground::AtomId x : action.changes.del) {
+          may[t].push_back(x * 2 + 1);
+        }
+        for (const ground::Effect & e : action.effects) {
+          if (e.kind == ground::Effect::Kind::Add) {
+            may[t].push_back(e.atom * 2);
+          } else if (e.kind == ground::Effect::Kind::Delete) {
+            may[t].push_back(e.atom * 2 + 1);
+          }
+        }
+      }
+      std::sort(may[t].begin(), may[t].end());
+      may[t].erase(std::unique(may[t].begin(), may[t].end()), may[t].end());
+    }
+    // Where each task is used: the methods that have it as a subtask
+    std::vector<std::vector<uint32_t>> used_in(nt);
+    for (uint32_t m = 0; m < nm; ++m) {
+      for (uint32_t t : p_.methods[m].subtasks) {
+        if (used_in[t].empty() || used_in[t].back() != m) {
+          used_in[t].push_back(m);
+        }
+      }
+    }
+    size_t total = 0;
+    uint64_t ticks = 0;
+    const auto began = std::chrono::steady_clock::now();
+    auto out_of_budget = [&]() {
+        return (++ticks & 255u) == 0 && budget_ != nullptr && budget_->exhausted();
+      };
+    // Tasks that can reach each other through decompositions may change the same atoms: the
+    // strongly connected components of "has as subtask", from the leaves up, each one taking
+    // what its own actions and the components below it change. Every edge is used once.
+    std::vector<std::vector<uint32_t>> children(nt);
+    for (uint32_t t = 0; t < nt; ++t) {
+      for (uint32_t m : p_.tasks[t].methods) {
+        for (uint32_t c : p_.methods[m].subtasks) {
+          if (c != t) {
+            children[t].push_back(c);
+          }
+        }
+      }
+      std::sort(children[t].begin(), children[t].end());
+      children[t].erase(std::unique(children[t].begin(), children[t].end()), children[t].end());
+    }
+    std::vector<uint32_t> component(nt, kNone);
+    std::vector<std::vector<uint32_t>> component_may;
+    {
+      std::vector<uint32_t> index(nt, kNone);
+      std::vector<uint32_t> low(nt, 0);
+      std::vector<bool> on_stack(nt, false);
+      std::vector<uint32_t> stack;
+      std::vector<std::pair<uint32_t, uint32_t>> calls;  // task and next child to look at
+      std::vector<uint8_t> marked(g_.atoms.size() * 2, 0);
+      uint32_t counter = 0;
+      for (uint32_t root = 0; root < nt; ++root) {
+        if (index[root] != kNone) {
+          continue;
+        }
+        calls.emplace_back(root, 0);
+        while (!calls.empty()) {
+          auto & [t, next] = calls.back();
+          if (next == 0) {
+            index[t] = low[t] = counter++;
+            stack.push_back(t);
+            on_stack[t] = true;
+          }
+          if (next < children[t].size()) {
+            const uint32_t c = children[t][next++];
+            if (index[c] == kNone) {
+              calls.emplace_back(c, 0);
+            } else if (on_stack[c]) {
+              low[t] = std::min(low[t], index[c]);
+            }
+            continue;
+          }
+          const uint32_t done = t;
+          calls.pop_back();
+          if (!calls.empty()) {
+            low[calls.back().first] = std::min(low[calls.back().first], low[done]);
+          }
+          if (low[done] != index[done]) {
+            continue;
+          }
+          // `done` closes a component: everything below it is already computed
+          const uint32_t id = static_cast<uint32_t>(component_may.size());
+          std::vector<uint32_t> members;
+          while (true) {
+            const uint32_t member = stack.back();
+            stack.pop_back();
+            on_stack[member] = false;
+            component[member] = id;
+            members.push_back(member);
+            if (member == done) {
+              break;
+            }
+          }
+          std::vector<uint32_t> all;
+          auto take = [&](const std::vector<uint32_t> & more) {
+              for (uint32_t e : more) {
+                if (!marked[e]) {
+                  marked[e] = 1;
+                  all.push_back(e);
+                }
+              }
+            };
+          for (uint32_t member : members) {
+            take(may[member]);
+            for (uint32_t c : children[member]) {
+              if (component[c] != id) {
+                take(component_may[component[c]]);
+              }
+            }
+          }
+          for (uint32_t e : all) {
+            marked[e] = 0;
+          }
+          std::sort(all.begin(), all.end());
+          total += all.size();
+          component_may.push_back(std::move(all));
+          if (total > 50000000 || out_of_budget()) {
+            return;
+          }
+        }
+      }
+    }
+    for (uint32_t t = 0; t < nt; ++t) {
+      may[t].clear();
+      may[t].shrink_to_fit();
+    }
+    const uint64_t unions = component_may.size();
+    if (std::getenv("KLIMAX_TRACE_SEARCH") != nullptr) {
+      std::fprintf(stderr, "infer: may-sets %zu entries, %llu unions, %.0f ms\n", total,
+        static_cast<unsigned long long>(unions), std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - began).count());
+    }
+    // What each task and method needs (unknown means "anything"; then it only shrinks)
+    std::vector<std::vector<uint32_t>> needs(nt);
+    std::vector<bool> known(nt, false);
+    std::vector<std::vector<uint32_t>> method_needs(nm);
+    std::vector<bool> method_known(nm, false);
+    std::vector<std::vector<uint32_t>> own(nm);  // of the method's own precondition
+    for (uint32_t m = 0; m < nm; ++m) {
+      if (p_.methods[m].has_precondition) {
+        own[m] = literals(p_.methods[m].precondition);
+      }
+    }
+    for (size_t t = 0; t < nt; ++t) {
+      if (!p_.tasks[t].actions.empty()) {
+        needs[t] = literals(p_.tasks[t].actions);
+        known[t] = true;
+      }
+    }
+    std::vector<uint8_t> brought(g_.atoms.size() * 2, 0);
+    uint64_t evaluations = 0;
+    std::vector<uint32_t> work;
+    std::vector<bool> queued(nm, true);
+    for (uint32_t m = static_cast<uint32_t>(nm); m-- > 0; ) {
+      work.push_back(m);
+    }
+    while (!work.empty()) {
+      if (out_of_budget()) {
+        return;
+      }
+      const uint32_t m = work.back();
+      work.pop_back();
+      queued[m] = false;
+      ++evaluations;
+      const tdg::Method & method = p_.methods[m];
+      const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
+        order_[method.method];
+      // Only once all its subtasks are known: from then on what it needs can only shrink
+      if (std::any_of(method.subtasks.begin(), method.subtasks.end(),
+        [&](uint32_t t) {return !known[t];}))
+      {
+        continue;  // comes back when the subtask is known
+      }
+      std::vector<uint32_t> mine = own[m];
+      std::vector<uint32_t> touched;
+      for (uint32_t step : order) {
+        const uint32_t t = method.subtasks[step];
+        for (uint32_t l : needs[t]) {
+          if (!brought[l]) {
+            mine.push_back(l);
+          }
+        }
+        // After it, what it may add can be true and what it may delete can be false
+        for (uint32_t e : component_may[component[t]]) {
+          if (!brought[e]) {
+            brought[e] = 1;
+            touched.push_back(e);
+          }
+        }
+      }
+      for (uint32_t e : touched) {
+        brought[e] = 0;
+      }
+      std::sort(mine.begin(), mine.end());
+      mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
+      if (method_known[m] && mine == method_needs[m]) {
+        continue;
+      }
+      method_needs[m] = std::move(mine);
+      method_known[m] = true;
+      const uint32_t parent = method.task;
+      if (parent == kNone) {
+        continue;
+      }
+      // The task needs what all its methods need: one more method can only take away
+      std::vector<uint32_t> common;
+      if (!known[parent]) {
+        common = method_needs[m];
+      } else {
+        std::set_intersection(needs[parent].begin(), needs[parent].end(),
+          method_needs[m].begin(), method_needs[m].end(), std::back_inserter(common));
+      }
+      if (!known[parent] || common.size() != needs[parent].size()) {
+        needs[parent] = std::move(common);
+        known[parent] = true;
+        for (uint32_t user : used_in[parent]) {
+          if (!queued[user]) {
+            queued[user] = true;
+            work.push_back(user);
+          }
+        }
+      }
+    }
+    if (std::getenv("KLIMAX_TRACE_SEARCH") != nullptr) {
+      size_t entries = 0;
+      for (const auto & v : method_needs) {
+        entries += v.size();
+      }
+      std::fprintf(stderr, "infer: needs %zu entries, %llu method evaluations\n", entries,
+        static_cast<unsigned long long>(evaluations));
+    }
+    method_needs_ = std::move(method_needs);
+  }
+
+  bool needs_hold(uint32_t method) const
+  {
+    if (method_needs_.empty()) {
+      return true;
+    }
+    for (uint32_t l : method_needs_[method]) {
+      if (state_[l / 2] == ((l & 1u) != 0)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // The steps of each network in the order to execute them
   void orders()
   {
@@ -318,6 +627,10 @@ private:
         method.precondition.end(), [&](uint32_t a) {return holds(g_.actions[a].precondition);}))
       {
         continue;
+      }
+      if (!needs_hold(methods[i])) {
+        ++pruned_;
+        continue;  // some subtask could never be executed
       }
       Choice choice;
       choice.top = top_;
@@ -472,6 +785,8 @@ private:
   std::vector<uint64_t> method_cost_;
   std::vector<std::vector<uint32_t>> methods_;  // of each task, cheapest first
   std::vector<uint32_t> initial_;
+  std::vector<std::vector<uint32_t>> method_needs_;  // by ground method; empty: not inferred
+  uint64_t pruned_ = 0;
   uint64_t bound_ = 0;
   bool cut_ = false;  // some branch was cut by the bound in this iteration
   uint64_t expansions_ = 0;

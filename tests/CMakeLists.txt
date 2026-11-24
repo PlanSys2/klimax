@@ -40,6 +40,7 @@ klimax_add_gtest(hddl_parser_test hddl/parser_test.cpp)
 klimax_add_gtest(hddl_model_test hddl/model_test.cpp)
 klimax_add_gtest(verifier_test hddl/verifier_test.cpp)
 klimax_add_gtest(grounder_test hddl/grounder_test.cpp)
+klimax_add_gtest(total_order_test search/total_order_test.cpp)
 
 if(KLIMAX_BUILD_CLI)
   add_test(NAME cli_version COMMAND klimax_cli --version)
@@ -88,4 +89,22 @@ if(KLIMAX_BUILD_CLI)
   set_tests_properties(cli_ground PROPERTIES
     PASS_REGULAR_EXPRESSION "facts 20, actions 30, abstract tasks 18, methods 77"
     FAIL_REGULAR_EXPRESSION "not in the ground problem")
+endif()
+
+if(KLIMAX_BUILD_CLI)
+  add_test(NAME cli_solve COMMAND klimax_cli
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl)
+  set_tests_properties(cli_solve PROPERTIES
+    PASS_REGULAR_EXPRESSION "==>.*drop tiago book living.*root.*<==")
+  add_test(NAME cli_solve_timeout COMMAND klimax_cli
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl --timeout 5)
+  set_tests_properties(cli_solve_timeout PROPERTIES PASS_REGULAR_EXPRESSION "; solved")
+  # A partial order is not planned yet: exit 12 and a reason
+  add_test(NAME cli_solve_unsupported COMMAND klimax_cli
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.hddl)
+  set_tests_properties(cli_solve_unsupported PROPERTIES
+    PASS_REGULAR_EXPRESSION "unsupported: a task network is partially ordered")
 endif()

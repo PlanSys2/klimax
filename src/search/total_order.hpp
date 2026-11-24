@@ -71,9 +71,9 @@ struct Result
  * proves nothing (Unsupported, with a message).
  *
  * With `Options::anytime`, the search goes on after the first plan: depth first under a bound
- * of one action fewer than the best plan so far, until the space under the bound is exhausted
- * (the plan is then optimal in number of actions, when every network is totally ordered) or the
- * budget runs out.
+ * of one action fewer than the best plan so far, until the space under the bound is exhausted or
+ * the budget runs out. With partial order, the search that interleaves then does the same.
+ * Exhausted, the plan is the shortest (`Result::optimal`).
  */
 Result total_order(
   const tdg::Problem & problem, kairos::Budget * budget = nullptr, const Options & options = {});

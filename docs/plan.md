@@ -390,7 +390,7 @@ Detalle de H4:
 - ✅ Modo anytime (`SolveOptions::anytime` y `on_plan`, `klimax --anytime`, `anytime=True` en
   Python): tras el primer plan, búsqueda en profundidad con una cota de una acción menos que el
   mejor plan hasta entonces. Cuando agota el espacio bajo la cota, el plan es el más corto y lo
-  dice (`optimal`). Solo con orden total: con orden parcial mejora, pero no demuestra.
+  dice (`optimal`).
   - Medido a 3 s en orden total (`bench/htn/anytime_check.py`): de 450 problemas resueltos,
     mejora el primer plan en 69 y demuestra el más corto en 247. Ningún planificador de la
     línea base encontró un plan más corto en ninguno de esos 247.
@@ -420,7 +420,18 @@ Detalle de H4:
   En los 124 problemas que Klimax y algún otro resuelven, la longitud óptima coincide en
   todos. Por dominios, Klimax va por detrás solo en Lamps (12 frente a 13) y Snake (0 frente a
   1). Falta medir a 30 s (batería de unos 75 minutos) y las recetas con resolutor LP.
-- ⏳ Óptimo con orden parcial: hoy Klimax mejora el plan pero no demuestra.
+- ✅ Óptimo con orden parcial: cuando la búsqueda en un orden de cada red no encuentra nada más
+  corto, sigue la que entrelaza (primero-el-mejor sobre redes de orden parcial) bajo la misma
+  cota; agotarla es la demostración. A 1 s:
+
+  | | Demostrados a 1 s (283) |
+  |---|---|
+  | PANDA óptimo | 96 |
+  | **Klimax** | **91** |
+
+  La longitud coincide en los 81 que resuelven ambos. Klimax va por detrás en Satellite (13
+  frente a 21), Woodworking (6 frente a 10) y Colouring (0 frente a 3), y por delante en
+  Ultralight-Cockpit (28 frente a 18). PandaDealer no tiene receta óptima para orden parcial.
 - ⏳ Búsqueda A* con heurística admisible, si a 30 s los rivales recortan la distancia.
 - ⏳ Calidad de los planes: 140 problemas donde otro planificador da un plan más corto.
 - ⏳ Heurísticas sobre la relajación RC más finas (landmarks, LM-cut).

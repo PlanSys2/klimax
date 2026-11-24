@@ -380,6 +380,9 @@ public:
         // The whole space under the bound was searched: in one order of each network only,
         // if the problem is partially ordered
         result.optimal = outcome == Outcome::Unsolvable && !linearized_;
+        if (outcome == Outcome::Unsolvable && linearized_) {
+          improve_interleaving(result, options);  // none shorter in this order: in any?
+        }
         return;
       }
       result.plan = std::move(shorter.plan);
@@ -392,6 +395,44 @@ public:
     }
     result.optimal = true;
   }
+
+  // The same over partially ordered networks, interleaving: best first under the bound, from
+  // scratch each time. Exhausting it is a proof.
+  void improve_interleaving(Result & result, const Options & options)
+  {
+    if (free_ == nullptr) {
+      return;
+    }
+    limit_ = ~uint64_t{0};
+    while (result.steps > 0) {
+      po_nodes_.clear();
+      po_items_.clear();
+      po_edges_.clear();
+      po_open_.clear();
+      po_seen_.clear();
+      po_fewest_.clear();
+      po_ids_ = 0;
+      po_over_ = false;
+      po_bound_ = result.steps - 1;
+      Result shorter;
+      const Outcome outcome = partial_order(shorter);
+      result.expansions = expansions_;
+      if (outcome != Outcome::Solved) {
+        result.optimal = outcome == Outcome::Unsolvable;
+        return;
+      }
+      result.plan = std::move(shorter.plan);
+      result.steps = bf_steps_;
+      result.message = "best first, partial order, under the length of the plan before";
+      ++result.plans;
+      if (options.on_plan) {
+        options.on_plan(result.plan, result.steps);
+      }
+    }
+    result.optimal = true;
+  }
+
+  bool linearized() const {return linearized_;}
 
   Result run()
   {
@@ -1844,6 +1885,7 @@ private:
     uint32_t first_child = 0;  // ids of the subtasks, by step of the method
     uint32_t child_count = 0;
     bool root = false;
+    uint32_t actions = 0;      // done to get here
   };
 
   uint64_t po_key(const PoNode & node) const
@@ -1942,7 +1984,8 @@ private:
       // Each search keeps what it has between turns: none may take more than its part of the
       // memory, or the others would have none
       if ((po_states_.size() + po_items_.size() + po_edges_.size()) * sizeof(uint64_t) +
-        po_nodes_.size() * sizeof(PoNode) + po_open_.size() * 16 + po_seen_.size() * 32 >
+        po_nodes_.size() * sizeof(PoNode) + po_open_.size() * 16 +
+        (po_seen_.size() + po_fewest_.size()) * 32 >
         kSearchMemory)
       {
         po_over_ = true;
@@ -1962,8 +2005,26 @@ private:
         }
         continue;
       }
-      if (!po_seen_.insert(po_key(node)).second) {
-        continue;
+      if (po_bound_ == kInfinite) {
+        if (!po_seen_.insert(po_key(node)).second) {
+          continue;
+        }
+      } else {
+        // Under a bound on the length, the same again only counts with fewer actions done
+        const auto [seen, fresh] = po_fewest_.emplace(po_key(node), node.actions);
+        if (!fresh) {
+          if (seen->second <= node.actions) {
+            continue;
+          }
+          seen->second = node.actions;
+        }
+        uint64_t least = node.actions;
+        for (uint32_t i = 0; i < node.item_count; ++i) {
+          least += task_cost_[po_items_[node.items + i].task];
+        }
+        if (least > po_bound_) {
+          continue;  // no plan this short through here
+        }
       }
       relaxed_->evaluate(state_);
       work_ += relaxed_->operators() / 32 + 1;
@@ -2004,6 +2065,7 @@ private:
           child.parent = n;
           child.did = item.id;
           child.did_task = item.task;
+          child.actions = node.actions + 1;
           po_replace(node, i, nullptr, child);
           const size_t mark = trail_.size();
           const uint64_t hash = state_hash_;
@@ -2037,6 +2099,7 @@ private:
           child.did = item.id;
           child.did_task = item.task;
           child.method = m;
+          child.actions = node.actions;
           po_replace(node, i, &method, child);
           po_push(child, without + cost);
         }
@@ -2499,6 +2562,8 @@ private:
   std::vector<uint64_t> po_hashes_;
   std::vector<std::pair<uint64_t, uint32_t>> po_open_;
   std::unordered_set<uint64_t> po_seen_;
+  std::unordered_map<uint64_t, uint32_t> po_fewest_;  // under a bound: fewest actions done
+  uint64_t po_bound_ = kInfinite;                     // on the length of the plan
   uint32_t po_ids_ = 0;
   bool po_over_ = false;
   bool po_exhausted_ = false;  // its whole space was searched: no plan at all

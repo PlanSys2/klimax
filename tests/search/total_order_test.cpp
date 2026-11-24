@@ -272,6 +272,41 @@ TEST(TotalOrderTest, StatesThatDifferInWhatNothingReads)
   EXPECT_LT(with.result.expansions * 2, without.result.expansions);
 }
 
+// Partial order: in either order of the two tasks B takes two actions; between the two of A it
+// takes one. Anytime gets to that plan and proves it the shortest.
+TEST(TotalOrderTest, AnytimeInterleaves)
+{
+  auto d = hddl::parse_domain(
+    "(define (domain turns) (:requirements :hierarchy)\n"
+    " (:predicates (first) (second))\n"
+    " (:task A :parameters ()) (:task B :parameters ())\n"
+    " (:method mA :parameters () :task (A) :ordered-subtasks (and (a1) (a2)))\n"
+    " (:method quick :parameters () :task (B) :ordered-subtasks (b1))\n"
+    " (:method slow :parameters () :task (B) :ordered-subtasks (and (c1) (c2)))\n"
+    " (:action a1 :parameters () :effect (first))\n"
+    " (:action a2 :parameters () :precondition (first) :effect (not (first)))\n"
+    " (:action b1 :parameters () :precondition (first) :effect (second))\n"
+    " (:action c1 :parameters () :effect (second))\n"
+    " (:action c2 :parameters () :effect (second)))", "d.hddl");
+  auto p = hddl::parse_problem(
+    "(define (problem p) (:domain turns) (:htn :subtasks (and (A) (B))) (:init))", "p.hddl");
+  ASSERT_TRUE(d.ok() && p.ok());
+  auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+  ASSERT_TRUE(m.ok());
+  auto g = tdg::ground(m.value());
+  ASSERT_TRUE(g.ok());
+  Options options;
+  options.anytime = true;
+  const Result r = total_order(g.value(), nullptr, options);
+  ASSERT_EQ(r.outcome, Outcome::Solved) << r.message;
+  EXPECT_EQ(r.steps, 3u);
+  EXPECT_TRUE(r.optimal);
+  const verifier::Outcome v = verifier::verify(m.value(), r.plan);
+  EXPECT_TRUE(v.valid) << v.reason << "\n" << r.plan;
+  EXPECT_LT(r.plan.find(" a1"), r.plan.find(" b1"));
+  EXPECT_LT(r.plan.find(" b1"), r.plan.find(" a2"));
+}
+
 // With anytime the search goes on to the shortest plan, and says that it is
 TEST(TotalOrderTest, AnytimeFindsTheShortestPlan)
 {

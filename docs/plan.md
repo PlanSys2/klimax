@@ -396,14 +396,32 @@ Detalle de H4:
     línea base encontró un plan más corto en ninguno de esos 247.
   - Frente al mejor plan de la línea base (a 30 s): más corto en 18, igual en 287, más largo
     en 140. Ahí está el margen para la puntuación satisficing.
-  - Limitación: la demostración necesita que toda recursión cueste acciones. Un método que se
-    llama a sí mismo sin ejecutar nada da un espacio infinito bajo cualquier cota, y entonces
-    termina por tiempo, sin demostrar.
+  - Un método que llama a su propia tarea antes de ejecutar nada daba un espacio infinito bajo
+    cualquier cota. Resuelto: en un plan con los mínimos pasos, una tarea anidada en sí misma
+    sin nada hecho entre medias cubre menos acciones que la que la contiene, así que el
+    anidamiento se acota por las acciones que quedan bajo la cota.
+  - Calidad a 3 s frente al mejor plan de cualquier rival: mediana 1,00 en 16 de 21 dominios;
+    los peores, Blocksworld-HPDDL (1,10), Barman y Multiarm-Blocksworld (1,03) y Logistics
+    (1,02).
 - ✅ En UPF: `AnytimePlanner(name="klimax")` da los planes según mejoran, y con la métrica de
   longitud (`MinimizeSequentialPlanLength`) un plan demostrado más corto vuelve como
   `SOLVED_OPTIMALLY`. `verify` da también la descomposición de un plan (para los intermedios).
-- ⏳ Búsqueda óptima de verdad (A* con heurística admisible) y medida frente a las
-  configuraciones óptimas de PANDA: no están en la línea base, hay que medirlas.
+- 🔄 Pista óptima (plan con menos acciones, demostrado). Rivales: las recetas óptimas del IPC
+  2023 que no necesitan un resolutor LP, PandaDealer (`rc2(lmc;cost)` con A*) y PANDA
+  (`rc2(lmc;est=cost)`), añadidas al arnés junto a `klimax-opt` (Klimax con `--anytime`, que
+  cuenta solo si demuestra). Orden total, a 1 s:
+
+  | | Demostrados a 1 s |
+  |---|---|
+  | **Klimax** | **240** |
+  | PandaDealer óptimo | 125 |
+  | PANDA óptimo | 118 |
+
+  En los 124 problemas que Klimax y algún otro resuelven, la longitud óptima coincide en
+  todos. Por dominios, Klimax va por detrás solo en Lamps (12 frente a 13) y Snake (0 frente a
+  1). Falta medir a 30 s (batería de unos 75 minutos) y las recetas con resolutor LP.
+- ⏳ Óptimo con orden parcial: hoy Klimax mejora el plan pero no demuestra.
+- ⏳ Búsqueda A* con heurística admisible, si a 30 s los rivales recortan la distancia.
 - ⏳ Calidad de los planes: 140 problemas donde otro planificador da un plan más corto.
 - ⏳ Heurísticas sobre la relajación RC más finas (landmarks, LM-cut).
 - ⏳ Replanificación y reparación de planes en UPF.

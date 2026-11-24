@@ -80,6 +80,21 @@ By domain at 30 s, against the best of the other configurations in each domain (
 | Ultralight-Cockpit | 29 | **29** | **29** | Linear-Simple, PANDA lamda, PANDA ppro, pandaPIengine d... |
 | Woodworking | 30 | 16 | **18** | Linear-Complex, Linear-Simple |
 
+## Optimal: the shortest plan, proved
+
+Klimax with `--anytime` counts when it proves that no plan has fewer actions. Against the
+optimal recipes of IPC 2023 that need no LP solver, at 1 s (longer limits are still to be
+measured):
+
+| Planner | Total order (761) | Partial order (283) |
+|---|---|---|
+| **Klimax** | 240 | 91 |
+| PandaDealer optimal | 125 | - |
+| PANDA optimal (`rc2(lmc)`) | 118 | 96 |
+
+Where Klimax and another planner both prove a plan the shortest, the lengths agree: in 124 of
+124 total-order problems and in 81 of 81 partial-order ones.
+
 ## Notes
 
 - The Klimax rows come from one run at 30 s per track, as those of the baseline do. The

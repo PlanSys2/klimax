@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc-release
+            os: ubuntu-24.04
+            cxx: g++
+          - name: clang-release
+            os: ubuntu-24.04
+            cxx: clang++
+          - name: gcc-arm64
+            os: ubuntu-24.04-arm
+            cxx: g++
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libgtest-dev clang python3-venv
+
+      # Klimax is built on Kairos' modules: Kairos installed with kairos::core
+      - name: Build and install Kairos
+        run: |
+          git clone --depth 1 https://github.com/PlanSys2/kairos.git "$RUNNER_TEMP/kairos"
+          cmake -S "$RUNNER_TEMP/kairos" -B "$RUNNER_TEMP/kairos-build" -G Ninja \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DCMAKE_BUILD_TYPE=Release \
+            -DKAIROS_INSTALL_CORE=ON -DKAIROS_BUILD_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/prefix"
+          cmake --build "$RUNNER_TEMP/kairos-build"
+          cmake --install "$RUNNER_TEMP/kairos-build"
+
+      - name: Python environment (for the module)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install nanobind pytest
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
+          -DKLIMAX_WARNINGS_AS_ERRORS=ON
+          -DKLIMAX_BUILD_PYTHON=ON
+          -DPython_EXECUTABLE="$RUNNER_TEMP/venv/bin/python"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --repeat until-pass:2

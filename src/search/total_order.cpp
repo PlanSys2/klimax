@@ -205,6 +205,9 @@ public:
   // Cost of getting a task done from the state evaluated
   uint32_t task(uint32_t t) const {return cost_[atoms_ + t];}
 
+  // Cost of making an atom true from the state evaluated
+  uint32_t atom(uint32_t a) const {return cost_[a];}
+
   size_t operators() const {return base_.size();}
 
 private:
@@ -854,6 +857,22 @@ private:
     }
   }
 
+  // What the goal of the problem still costs from the state evaluated; kInfinite if some of it
+  // cannot be made true any more. A plan must also end in the goal: a state that destroys part
+  // of it is further from the end.
+  uint64_t goal_cost() const
+  {
+    uint64_t sum = 0;
+    for (ground::AtomId a : g_.goal.positive) {
+      const uint32_t cost = relaxed_->atom(a);
+      if (cost == Relaxed::kUnreached) {
+        return kInfinite;
+      }
+      sum += cost;
+    }
+    return sum;
+  }
+
   // --- Best first ----------------------------------------------------------------------------
   // Greedy best-first search over (state, stack): the node with the lowest relaxed cost of what
   // is left is expanded next, wherever it is. Expanding a node runs the actions at the top of
@@ -906,8 +925,12 @@ private:
       evaluated_hash_ = state_hash_;
       ++evaluations_;
     }
-    // What waits below costs the same for every method; if some of it is impossible, so is this
-    uint64_t rest = 0;
+    // What waits below and the goal cost the same for every method; if some of it is
+    // impossible, so is this
+    uint64_t rest = goal_cost();
+    if (rest == kInfinite) {
+      return;
+    }
     uint32_t c = below;
     for (int depth = 0; c != kNone && depth < 64; ++depth) {
       const uint32_t cost = relaxed_->task(bf_cells_[c].task);
@@ -1167,6 +1190,9 @@ private:
           cost += c;
           cell = cells_[cell].next;
         }
+        const uint64_t goal = goal_cost();
+        possible = possible && goal != kInfinite;
+        cost += goal == kInfinite ? 0 : goal;
       }
       while (trail_.size() > mark) {
         const ground::AtomId a = trail_.back();

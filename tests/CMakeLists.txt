@@ -37,6 +37,7 @@ function(klimax_add_gtest name)
 endfunction()
 
 klimax_add_gtest(hddl_parser_test hddl/parser_test.cpp)
+klimax_add_gtest(hddl_model_test hddl/model_test.cpp)
 
 if(KLIMAX_BUILD_CLI)
   add_test(NAME cli_version COMMAND klimax_cli --version)
@@ -53,7 +54,7 @@ if(KLIMAX_BUILD_CLI)
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl)
   set_tests_properties(cli_check PROPERTIES
-    PASS_REGULAR_EXPRESSION "actions 6, tasks 3, methods 6, objects 7, initial tasks 2")
+    PASS_REGULAR_EXPRESSION "actions 6, tasks 3, methods 6, objects 7, initial tasks 2, total order")
   add_test(NAME cli_check_missing_file COMMAND klimax_cli --check nowhere.hddl nowhere.hddl)
   set_tests_properties(cli_check_missing_file PROPERTIES WILL_FAIL ON)
 endif()

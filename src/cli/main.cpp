@@ -60,7 +60,8 @@ int check(const char * domain_path, const char * problem_path)
   const klimax::Summary & s = r.summary;
   std::cout << "types " << s.types << ", predicates " << s.predicates << ", actions "
             << s.actions << ", tasks " << s.tasks << ", methods " << s.methods << ", objects "
-            << s.objects << ", initial tasks " << s.initial_tasks << "\n";
+            << s.objects << ", initial tasks " << s.initial_tasks << ", "
+            << (s.total_order ? "total order" : "partial order") << "\n";
   return 0;
 }
 

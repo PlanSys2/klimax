@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "hddl/model.hpp"
 #include "hddl/parser.hpp"
 #include "kairos/diagnostics.hpp"
 
@@ -47,17 +48,6 @@ void append(
   }
 }
 
-// A network is totally ordered if written so, or if it has at most one subtask
-bool total(const hddl::TaskNetwork & n)
-{
-  if (n.ordered || n.subtasks.size() <= 1) {
-    return true;
-  }
-  // A chain given with :ordering: n-1 constraints each linking a different pair is not proof,
-  // so only the cheap sufficient test here; the model decides for real
-  return false;
-}
-
 }  // namespace
 
 CheckResult check(
@@ -72,19 +62,22 @@ CheckResult check(
   if (!d.ok() || !p.ok()) {
     return result;
   }
-  Summary & s = result.summary;
-  s.types = d->pddl.types.size();
-  s.predicates = d->pddl.predicates.size();
-  s.actions = d->pddl.actions.size() + d->pddl.durative_actions.size();
-  s.tasks = d->tasks.size();
-  s.methods = d->methods.size();
-  s.objects = p->pddl.objects.size();
-  s.initial_tasks = p->htn.subtasks.size();
-  s.has_goal = p->pddl.goal.valid();
-  s.total_order = total(p->htn);
-  for (const hddl::Method & m : d->methods) {
-    s.total_order = s.total_order && total(m.network);
+  // Diagnostics of the model come from either file: rendered without the source line
+  auto model = hddl::analyze(std::move(d).value(), std::move(p).value());
+  append(result.diagnostics, model.diagnostics(), "");
+  if (!model.ok()) {
+    return result;
   }
+  Summary & s = result.summary;
+  s.types = model->domain.types.size();
+  s.predicates = model->domain.predicates.items.size();
+  s.actions = model->user_actions + model->pddl.durative_actions.size();
+  s.tasks = model->tasks.size() - s.actions;
+  s.methods = model->methods.size();
+  s.objects = model->objects.objects.items.size();
+  s.initial_tasks = model->initial.steps.size();
+  s.has_goal = model->problem.goal.valid();
+  s.total_order = model->total_order;
   result.ok = true;
   return result;
 }

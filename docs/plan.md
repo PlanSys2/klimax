@@ -190,12 +190,16 @@ Pasan a la fase que los necesita:
 
 Detalle de H1:
 
-- ⏳ Parser de HDDL 1.0 con errores con fichero, línea y columna.
-- ⏳ Modelo: tareas, métodos, redes de tareas, restricciones de variables.
-- ⏳ Lee los 1044 problemas del banco del IPC 2023 (y el de 2020).
+- ✅ Parser de HDDL 1.0 con errores con fichero, línea y columna, sobre el parser de Kairos
+  (punto de extensión en Kairos, PR #9).
+- ✅ Modelo: tareas, métodos, redes de tareas, restricciones de variables; nombres, aridades,
+  tipos y ciclos de orden comprobados.
+- ✅ Lee los 1044 problemas del banco del IPC 2023.
+- ⏳ Lee el banco del IPC 2020.
 - ⏳ Grounding con grafo de descomposición de tareas.
 - ⏳ Verificador de planes, contrastado con el del IPC sobre los planes de la línea base.
-- ⏳ `klimax --check` y `klimax --verify` en el ejecutable.
+- ✅ `klimax --check` en el ejecutable.
+- ⏳ `klimax --verify` en el ejecutable.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

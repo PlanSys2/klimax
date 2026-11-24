@@ -347,12 +347,16 @@ Detalle de H3b:
   - Cada característica declarada tiene su prueba: orden total y parcial, variables y
     restricciones en las redes, condiciones negativas, disyuntivas, existenciales y
     universales, igualdades, efectos condicionales y universales, tipos jerárquicos, fluentes
-    de objeto. 11 pruebas, incluido el ejemplo jerárquico de UPF y sus planes de referencia.
+    de objeto. 13 pruebas, incluido el ejemplo jerárquico de UPF y sus planes de referencia.
 - ✅ El banco del IPC 2023 por la vía UPF (`bench/htn/upf_route.py`: el lector de UPF lee el
   HDDL, `up-klimax` planifica y valida): con un problema por dominio, 24 de 32 dominios llegan
   al plan validado. Los 8 restantes se paran en el lector de UPF (nombres repetidos entre
   tipos y objetos en Barman, Freecell y Woodworking; sintaxis que no lee en Snake y Colouring;
   un tipo declarado dos veces en UM-Translog), no en Klimax. Son candidatos a aportar a UPF.
+- ✅ La reescritura de fluentes de objeto, ofrecida como compilador de UPF
+  (`klimax-htn-usertype-fluents-remover`): UPF no tenía ninguno para problemas jerárquicos y lo
+  elige solo cuando se le pide esa compilación para uno. Con `plan_back` para devolver un plan
+  jerárquico entero al problema original (UPF solo prevé devolver las acciones).
 - 🔄 Primera comparación con Aries (`up-aries` 0.5.0) por la vía UPF, en los 14 problemas de las
   pruebas de `up-klimax`, validando los planes de cada uno con el validador del otro:
   - `aries-val` acepta todos los planes de Klimax.
@@ -363,8 +367,6 @@ Detalle de H3b:
   - Aries no resuelve los tres problemas con cuantificadores (error interno) ni demuestra el
     problema sin solución (agota el tiempo; Klimax lo demuestra en 30 ms).
 - ⏳ Aprovechar el resto de UPF:
-  - Ofrecer la reescritura anterior como compilador de UPF: hoy no tiene ninguno para
-    problemas jerárquicos, y le sirve a cualquier motor HTN.
   - Comparación con Aries (`up-aries`) por la misma vía, en los problemas que ambos expresan.
   - El banco de pruebas de UPF (`up-test-cases`) y su informe de motores.
   - Modo anytime, replanificación y reparación de planes: con H4 (anytime y óptimo).

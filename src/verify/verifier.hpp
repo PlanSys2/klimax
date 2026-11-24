@@ -20,6 +20,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "hddl/model.hpp"
 
@@ -30,6 +31,29 @@ struct Outcome
 {
   bool valid = false;
   std::string reason;  // why not, in one sentence; empty if valid
+};
+
+/// @brief A step of a verified plan: an action, or a task with the method that decomposes it.
+struct Step
+{
+  std::string id;                 // as in the plan
+  std::string task;
+  std::vector<std::string> args;  // objects
+  bool primitive = false;
+  // Abstract tasks only
+  std::string method;
+  std::vector<std::string> params;    // objects, by parameter of the method
+  std::vector<std::string> subtasks;  // ids, by subtask of the method as written in the domain
+  std::vector<std::string> labels;    // of those subtasks in the domain; "" where not given
+};
+
+/// @brief The decomposition of a verified plan.
+struct Tree
+{
+  std::vector<Step> steps;            // one per line of the plan
+  std::vector<std::string> sequence;  // ids of the actions, in the order of execution
+  std::vector<std::string> roots;     // ids, by task of the initial task network
+  std::vector<std::string> root_labels;
 };
 
 /**
@@ -44,8 +68,11 @@ struct Outcome
  *
  * Independent of the planner: it interprets the syntax tree directly. Sequential plans without
  * numbers (level L1); anything else is reported as unsupported, never accepted.
+ *
+ * With `tree`, a valid plan is also given as its decomposition: which subtask of its method each
+ * step is, and the values of the method's parameters (those with which its precondition held).
  */
-Outcome verify(const hddl::Model & model, std::string_view plan);
+Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree = nullptr);
 
 }  // namespace klimax::verifier
 

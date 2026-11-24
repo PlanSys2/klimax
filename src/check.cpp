@@ -62,10 +62,11 @@ void append(
 // Names as first written in the domain or the problem. HDDL does not distinguish case and
 // Klimax works in lower case, but the plan is for tools that may: the verifier of the IPC, in
 // its strict mode, wants the spelling of the input.
-std::string with_original_names(
-  const std::string & plan, std::string_view domain, std::string_view problem)
+using Spelling = std::unordered_map<std::string, std::string>;
+
+Spelling spelling_of(std::string_view domain, std::string_view problem)
 {
-  std::unordered_map<std::string, std::string> spelling;
+  Spelling spelling;
   for (std::string_view text : {domain, problem}) {
     for (const kairos::pddl::Token & token : kairos::pddl::tokenize(text)) {
       if (token.kind == kairos::pddl::TokenKind::Name) {
@@ -77,6 +78,11 @@ std::string with_original_names(
       }
     }
   }
+  return spelling;
+}
+
+std::string with_original_names(const std::string & plan, const Spelling & spelling)
+{
   if (spelling.empty()) {
     return plan;
   }
@@ -290,7 +296,46 @@ SolveResult solve(
   switch (found.outcome) {
     case search::Outcome::Solved:
       result.status = Status::Solved;
-      result.plan = with_original_names(found.plan, domain, problem);
+      {
+        const Spelling spelling = spelling_of(domain, problem);
+        result.plan = with_original_names(found.plan, spelling);
+        if (options.decomposition) {
+          verifier::Tree tree;
+          const verifier::Outcome checked = verifier::verify(model.value(), found.plan, &tree);
+          if (!checked.valid) {
+            result.status = Status::InternalError;
+            result.message = "the plan found is not valid: " + checked.reason;
+            result.plan.clear();
+            break;
+          }
+          auto name = [&](std::string & word) {
+              if (const auto it = spelling.find(word); it != spelling.end()) {
+                word = it->second;
+              }
+            };
+          for (verifier::Step & step : tree.steps) {
+            PlanStep out;
+            name(step.task);
+            name(step.method);
+            std::for_each(step.args.begin(), step.args.end(), name);
+            std::for_each(step.params.begin(), step.params.end(), name);
+            std::for_each(step.labels.begin(), step.labels.end(), name);
+            out.id = std::move(step.id);
+            out.task = std::move(step.task);
+            out.args = std::move(step.args);
+            out.primitive = step.primitive;
+            out.method = std::move(step.method);
+            out.params = std::move(step.params);
+            out.subtasks = std::move(step.subtasks);
+            out.labels = std::move(step.labels);
+            result.steps_of_plan.push_back(std::move(out));
+          }
+          std::for_each(tree.root_labels.begin(), tree.root_labels.end(), name);
+          result.sequence = std::move(tree.sequence);
+          result.roots = std::move(tree.roots);
+          result.root_labels = std::move(tree.root_labels);
+        }
+      }
       break;
     case search::Outcome::Unsolvable:
       result.status = Status::Unsolvable;
@@ -312,6 +357,7 @@ std::string_view to_string(Status status)
     case Status::Unsolvable: return "unsolvable";
     case Status::Timeout: return "timeout";
     case Status::Unsupported: return "unsupported";
+    case Status::InternalError: return "internal error";
     default: return "invalid input";
   }
 }

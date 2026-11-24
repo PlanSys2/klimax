@@ -382,6 +382,7 @@ struct Node
   uint32_t first_leaf = kNone;  // smallest and largest position below; kNone if no leaf
   uint32_t last_leaf = kNone;
   std::vector<std::vector<uint32_t>> bindings;  // abstract: values of the method's parameters
+  size_t held = 0;  // the one of them its precondition held with
   // Events of the node in the precedence graph
   uint32_t start = 0;
   uint32_t test = kNone;
@@ -431,6 +432,48 @@ public:
     }
     build_events();
     execute();
+  }
+
+  // The plan as its decomposition, once run() has accepted it
+  Tree tree() const
+  {
+    Tree out;
+    auto labels = [](const hddl::Network & net) {
+        std::vector<std::string> ids;
+        for (const hddl::Step & step : net.steps) {
+          ids.push_back(step.id);
+        }
+        return ids;
+      };
+    for (const Node & n : nodes_) {
+      Step step;
+      step.id = n.id;
+      step.task = m_.tasks[n.task].name;
+      for (uint32_t a : n.args) {
+        step.args.push_back(object(a).name);
+      }
+      step.primitive = n.primitive;
+      if (!n.primitive) {
+        const hddl::MethodInfo & method = m_.methods[n.method];
+        step.method = method.name;
+        for (uint32_t value : n.bindings.at(n.held)) {
+          step.params.push_back(object(value).name);
+        }
+        for (uint32_t c : n.children) {
+          step.subtasks.push_back(nodes_[c].id);
+        }
+        step.labels = labels(method.network);
+      }
+      out.steps.push_back(std::move(step));
+    }
+    for (uint32_t n : sequence_) {
+      out.sequence.push_back(nodes_[n].id);
+    }
+    for (uint32_t n : roots_) {
+      out.roots.push_back(nodes_[n].id);
+    }
+    out.root_labels = labels(m_.initial);
+    return out;
   }
 
 private:
@@ -821,7 +864,7 @@ private:
     }
   }
 
-  bool precondition_holds(const Node & n)
+  bool precondition_holds(Node & n)
   {
     const hddl::MethodInfo & method = m_.methods[n.method];
     if (method.precondition_action < 0) {
@@ -834,6 +877,7 @@ private:
         env.emplace_back(a.params[p].name, binding[method.precondition_params[p]]);
       }
       if (domain_.holds(a.precondition, state_, env)) {
+        n.held = static_cast<size_t>(&binding - n.bindings.data());
         return true;
       }
     }
@@ -991,10 +1035,14 @@ private:
 
 }  // namespace
 
-Outcome verify(const hddl::Model & model, std::string_view plan)
+Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree)
 {
   try {
-    Verifier(model, plan).run();
+    Verifier verifier(model, plan);
+    verifier.run();
+    if (tree != nullptr) {
+      *tree = verifier.tree();
+    }
   } catch (const Invalid & e) {
     return Outcome{false, e.reason};
   }

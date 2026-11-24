@@ -161,7 +161,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⏳ pendiente.
 | H1 | ✅ | Parser de HDDL 1.0, modelo, grounding con grafo de descomposición, verificador de planes | Lee todo el banco del IPC; verificador de acuerdo con el de PANDA |
 | H2 | ✅ | Motor de orden total (lifted y grounded) | Cobertura ≥ PandaDealer a 1 s y 30 s |
 | H3 | ✅ | Orden parcial: linealización y motor completo | Cobertura ≥ Linear y PANDApro |
-| H3b | ⏳ | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
+| H3b | 🔄 | Módulo Python y motor de unified-planning (`up-klimax`, con `up-kairos` como modelo), para HTN puro | Klimax resuelve desde unified-planning los problemas jerárquicos que su modelo expresa, con los planes verificados |
 | H4 | ⏳ | Heurísticas RC, anytime, óptimo | Mejor puntuación satisficing; óptimo ≥ PANDApro |
 | H5 | ⏳ | Numérico | Más de 91/140 en el banco de Quenard |
 | H6 | ⏳ | Temporal: HDDL 2.1 completo, banco de referencia propio (3.1); Aries, vía unified-planning, como rival | Resuelve el banco; planes validados; comparación con Aries en los problemas que ambos expresan |
@@ -323,6 +323,22 @@ casi hecha):
 - ⏳ Reducir la ramificación del entrelazado (Colouring: 8 de 30; se queda sin memoria).
 - ✅ Criterio de salida: cobertura ≥ Linear y PANDApro. Cumplido en las tres marcas.
 
+
+Detalle de H3b:
+
+- ✅ Entorno de trabajo con unified-planning 1.3 y nanobind (`.klimax/venv`, fuera de los
+  repositorios). unified-planning ya escribe HDDL desde sus problemas jerárquicos y tiene un plan
+  jerárquico (`HierarchicalPlan`) en el que devolver el resultado.
+- 🔄 El plan con estructura en la interfaz pública (`SolveOptions::decomposition`): de cada
+  paso, qué subtarea de su método es cada hijo y los valores de los parámetros del método. Lo
+  da el verificador, que ya lo calcula, así que todo plan devuelto por esta vía está verificado
+  de forma independiente de la búsqueda. Si la verificación falla, el resultado es un error
+  interno (`Status::InternalError`), nunca un plan.
+- ⏳ Módulo Python `klimax` (nanobind, como el de Kairos): `solve`, `check`, `verify`.
+- ⏳ `up-klimax`, en su propio repositorio, con `up-kairos` como modelo: planificador de una
+  llamada para problemas jerárquicos sin tiempo ni números, y validador de planes jerárquicos.
+- ⏳ Pruebas con los problemas jerárquicos de ejemplo de unified-planning y comparación con
+  Aries en los que ambos resuelven.
 
 H2–H4 son donde está el riesgo: es el terreno de PANDA. H5–H6 son donde está la novedad.
 

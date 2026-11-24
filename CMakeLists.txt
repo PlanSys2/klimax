@@ -36,6 +36,7 @@ endif()
 option(KLIMAX_BUILD_TESTS "Build the tests" ${_klimax_tests_default})
 option(KLIMAX_BUILD_CLI "Build the klimax executable" ON)
 option(KLIMAX_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+option(KLIMAX_BUILD_PYTHON "Build the Python module (needs nanobind)" OFF)
 
 include(GNUInstallDirs)
 
@@ -62,6 +63,10 @@ add_subdirectory(src)
 if(KLIMAX_BUILD_TESTS)
   include(CTest)
   add_subdirectory(tests)
+endif()
+
+if(KLIMAX_BUILD_PYTHON)
+  add_subdirectory(python)
 endif()
 
 include(CMakePackageConfigHelpers)

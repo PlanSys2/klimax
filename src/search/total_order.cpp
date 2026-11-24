@@ -55,6 +55,7 @@ struct Node
   uint32_t task = 0;
   uint32_t parent = kNone;
   uint32_t method = kNone;  // abstract: the ground method applied
+  uint32_t start = 0;       // abstract: actions done when it was decomposed
 };
 
 // A decomposition that may be undone: where to come back to and what to try next
@@ -614,7 +615,7 @@ private:
     evaluated_ = false;
     top_ = kNone;
     // The ways of instantiating the initial network are the methods of a task above all
-    nodes_.assign(1, Node{kNone, kNone, kNone});
+    nodes_.assign(1, Node{kNone, kNone, kNone, 0});
     bool found = descend(kNone, 0, kNone, 0);
     while (found || backtrack()) {
       found = false;
@@ -2244,6 +2245,24 @@ private:
   bool try_from(
     uint32_t task, uint32_t node, uint32_t below, std::vector<uint32_t> methods, uint32_t from)
   {
+    // A task inside itself with nothing done in between: in a plan with as few steps as can
+    // be, each of them covers fewer actions than the one around it (otherwise the inner one
+    // would do in its place), so there are at most as many as actions are left under the
+    // bound. Without this, a method that calls its own task before any action never ends.
+    const uint32_t done_now = static_cast<uint32_t>(executed_.size());
+    if (task != kNone) {
+      uint64_t nested = 0;
+      for (uint32_t a = nodes_[node].parent; a != kNone && a != 0 && nodes_[a].start == done_now;
+        a = nodes_[a].parent)
+      {
+        nested += nodes_[a].task == task;
+      }
+      if (nested > bound_ - std::min<uint64_t>(bound_, done_now) + 1) {
+        cut_ = true;
+        return false;
+      }
+    }
+    nodes_[node].start = done_now;
     for (uint32_t i = from; i < methods.size(); ++i) {
       const tdg::Method & method = p_.methods[methods[i]];
       Choice choice;
@@ -2259,7 +2278,7 @@ private:
       // Children in the order of execution; pushed last to first
       const uint32_t first_node = static_cast<uint32_t>(nodes_.size());
       for (uint32_t step : order) {
-        nodes_.push_back(Node{method.subtasks[step], node, kNone});
+        nodes_.push_back(Node{method.subtasks[step], node, kNone, 0});
       }
       uint32_t top = below;
       for (size_t k = order.size(); k-- > 0; ) {

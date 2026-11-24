@@ -306,6 +306,46 @@ TEST(TotalOrderTest, AnytimeFindsTheShortestPlan)
   EXPECT_FALSE(first.optimal);
 }
 
+// A method that calls its own task before doing anything: the space under any bound on the
+// length is infinite, unless the nesting is bounded too
+TEST(TotalOrderTest, RecursionWithoutProgressEnds)
+{
+  const char * domain =
+    "(define (domain d) (:requirements :hierarchy)\n"
+    " (:predicates (done) (tired))\n"
+    " (:task finish :parameters ()) (:task idle :parameters ())\n"
+    " (:method again :parameters () :task (finish) :ordered-subtasks (and (finish) (idle)))\n"
+    " (:method now :parameters () :task (finish) :ordered-subtasks (and (act)))\n"
+    " (:method nothing :parameters () :task (idle) :ordered-subtasks (and))\n"
+    " (:method yawn :parameters () :task (idle) :ordered-subtasks (and (rest)))\n"
+    " (:action act :parameters () :precondition () :effect (done))\n"
+    " (:action rest :parameters () :precondition () :effect (tired)))";
+  auto ask = [&](const char * goal) {
+      auto d = hddl::parse_domain(domain, "d.hddl");
+      auto p = hddl::parse_problem(std::string(
+          "(define (problem p) (:domain d) (:htn :ordered-subtasks (and (finish)))"
+          " (:init) (:goal ") + goal + "))", "p.hddl");
+      EXPECT_TRUE(d.ok() && p.ok());
+      auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+      EXPECT_TRUE(m.ok());
+      auto g = tdg::ground(m.value());
+      EXPECT_TRUE(g.ok());
+      Options options;
+      options.anytime = true;
+      return total_order(g.value(), nullptr, options);
+    };
+  // One action is enough
+  Result one = ask("(done)");
+  ASSERT_EQ(one.outcome, Outcome::Solved);
+  EXPECT_EQ(one.steps, 1u);
+  EXPECT_TRUE(one.optimal);
+  // Being tired too takes going round once: the nesting allowed grows with the bound
+  Result two = ask("(and (done) (tired))");
+  ASSERT_EQ(two.outcome, Outcome::Solved);
+  EXPECT_EQ(two.steps, 2u);
+  EXPECT_TRUE(two.optimal);
+}
+
 TEST(TotalOrderTest, Budget)
 {
   auto d = hddl::parse_domain(kDomain, "d.hddl");

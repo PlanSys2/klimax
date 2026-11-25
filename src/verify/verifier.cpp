@@ -201,6 +201,8 @@ public:
   }
 
   // The plan as its decomposition, once run() has accepted it
+  std::optional<double> metric() const {return metric_;}
+
   Tree tree() const
   {
     Tree out;
@@ -852,10 +854,6 @@ private:
         invalid("unsupported: timed initial literals");
       }
       if (item.kind != ast::InitItem::Kind::Fact) {
-        // Costs do not change which plans are valid
-        if (std::string_view(m_.problem.symbols.name(item.name)) == "total-cost") {
-          continue;
-        }
         Atom fluent{problem_.function(item.name)};
         for (ast::TermId t : item.args) {
           fluent.push_back(problem_.object(t, env));
@@ -869,8 +867,15 @@ private:
       }
       state_.insert(problem_.atom(item.name, item.args, env));
     }
+    // Action costs: (total-cost) starts at 0 when the problem does not say
+    if (auto cost = m_.domain.functions.find("total-cost");
+      cost && m_.domain.functions.items[*cost].numeric)
+    {
+      values_.try_emplace(Atom{cost->value()}, 0.0);
+    }
     domain_.numbers(&values_);
     problem_.numbers(&values_);
+    domain_.costs(true);
     for (uint32_t e = 0; e < events_.size(); ++e) {
       if (events_[e].pending == 0 && !events_[e].placed && !is_leaf_[e] &&
         events_[e].node == kNone)
@@ -927,6 +932,30 @@ private:
         invalid("the goal does not hold at the end of the plan");
       }
     }
+    // The metric, in the state the plan ends in. Time is not read yet: no value then
+    if (m_.problem.metric && !uses_time(m_.problem.metric->expr)) {
+      env.clear();
+      metric_ = problem_.number(m_.problem.metric->expr, env);
+    }
+  }
+
+  bool uses_time(ast::ExprId id) const
+  {
+    const ast::Expr & e = m_.problem.nodes.exprs[id];
+    switch (e.kind) {
+      case ast::ExprKind::Number:
+      case ast::ExprKind::Function:
+        return false;
+      case ast::ExprKind::Add:
+      case ast::ExprKind::Sub:
+      case ast::ExprKind::Mul:
+      case ast::ExprKind::Div:
+      case ast::ExprKind::Neg:
+        return std::any_of(e.children.begin(), e.children.end(),
+                 [&](ast::ExprId c) {return uses_time(c);});
+      default:
+        return true;
+    }
   }
 
   // Why an event cannot take place yet, for the message
@@ -961,6 +990,7 @@ private:
   size_t placed_ = 0;
   State state_;
   Values values_;  // of the numeric fluents
+  std::optional<double> metric_;
 };
 
 }  // namespace
@@ -973,10 +1003,10 @@ Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree)
     if (tree != nullptr) {
       *tree = verifier.tree();
     }
+    return Outcome{true, "", verifier.metric()};
   } catch (const Invalid & e) {
-    return Outcome{false, e.reason};
+    return Outcome{false, e.reason, std::nullopt};
   }
-  return Outcome{true, ""};
 }
 
 }  // namespace klimax::verifier

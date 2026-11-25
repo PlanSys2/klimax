@@ -50,10 +50,13 @@ struct SolveOptions
   // Also give the plan as its decomposition (`SolveResult::steps_of_plan` and what follows it).
   // The verifier works it out, so this verifies the plan whatever `verify` says.
   bool decomposition = false;
-  // Go on after the first plan, looking for shorter ones, until none is left or the time runs
-  // out. The result is the shortest found; `SolveResult::optimal` says if it was proved so.
+  // Go on after the first plan, looking for better ones, until none is left or the time runs
+  // out. The result is the best found; `SolveResult::optimal` says if it was proved so.
+  // Better is cheaper by the :metric of the problem when it adds up action costs (as
+  // `(increase (total-cost) 3)`), with fewer actions when there is no metric, and with a better
+  // value of any other metric among the plans that are no longer.
   bool anytime = false;
-  // Called with every plan found (IPC format), each shorter than the one before
+  // Called with every plan found (IPC format), each better than the one before
   std::function<void(const std::string & plan, size_t steps)> on_plan;
 };
 
@@ -70,8 +73,13 @@ struct SolveResult
   std::string message;     // Unsupported: what is not supported
   std::vector<Diagnostic> diagnostics;
   size_t steps = 0;        // actions of the plan
-  size_t plans = 0;        // found, each shorter than the one before (1 unless anytime)
-  bool optimal = false;    // proved: no plan has fewer actions
+  size_t plans = 0;        // found, each better than the one before (1 unless anytime)
+  // Proved: no plan is cheaper by the metric, if it adds up action costs that are all above
+  // zero; no plan has fewer actions, if there is no metric. Never with another metric.
+  bool optimal = false;
+  // The value of the problem's :metric at the end of the plan (none: no metric, or one over
+  // time)
+  std::optional<double> cost;
   double ground_ms = 0.0;
   double search_ms = 0.0;
   uint64_t expansions = 0;

@@ -17,6 +17,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/function.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
@@ -93,6 +94,7 @@ NB_MODULE(_klimax, m)
   .def_ro("steps", &klimax::SolveResult::steps)
   .def_ro("plans", &klimax::SolveResult::plans)
   .def_ro("optimal", &klimax::SolveResult::optimal)
+  .def_ro("cost", &klimax::SolveResult::cost)
   .def_ro("ground_ms", &klimax::SolveResult::ground_ms)
   .def_ro("search_ms", &klimax::SolveResult::search_ms)
   .def_ro("expansions", &klimax::SolveResult::expansions);
@@ -100,6 +102,7 @@ NB_MODULE(_klimax, m)
   nb::class_<klimax::VerifyResult>(m, "VerifyResult")
   .def_ro("valid", &klimax::VerifyResult::valid)
   .def_ro("reason", &klimax::VerifyResult::reason)
+  .def_ro("metric", &klimax::VerifyResult::metric)
   .def_ro("steps_of_plan", &klimax::VerifyResult::steps_of_plan)
   .def_ro("sequence", &klimax::VerifyResult::sequence)
   .def_ro("roots", &klimax::VerifyResult::roots)

@@ -45,6 +45,7 @@ klimax_add_gtest(lifted_test search/lifted_test.cpp)
 klimax_add_gtest(sat_solver_test sat/solver_test.cpp)
 klimax_add_gtest(sat_search_test search/sat_test.cpp)
 klimax_add_gtest(numeric_test search/numeric_test.cpp)
+klimax_add_gtest(metric_test search/metric_test.cpp)
 
 if(KLIMAX_BUILD_CLI)
   add_test(NAME cli_version COMMAND klimax_cli --version)

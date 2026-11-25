@@ -19,6 +19,7 @@
 #define KLIMAX__CHECK_HPP_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -112,6 +113,9 @@ struct VerifyResult
   bool valid = false;
   std::string reason;                   // why the plan is not valid, in one sentence
   std::vector<Diagnostic> diagnostics;  // errors in the domain or the problem, if any
+  // Of a valid plan, the value of the problem's :metric at its end (none: no metric, one over
+  // time, or one that reads a fluent with no value)
+  std::optional<double> metric;
   // With `decomposition`, of a valid plan: every step, the actions in the order of execution
   // and the tasks of the initial task network (ids, with the labels the problem gives them)
   std::vector<PlanStep> steps_of_plan;

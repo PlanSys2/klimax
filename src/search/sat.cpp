@@ -83,8 +83,17 @@ private:
   bool search(Result & result)
   {
     if (layers_.empty()) {
+      // A constant added to a fluent that has a value changes nothing here: with no numeric
+      // condition anywhere, nothing reads it (a cost, which the metric adds up)
+      auto cost = [&](const ground::Effect & e) {
+          return e.kind == ground::Effect::Kind::Numeric && e.condition.empty() &&
+                 e.start_condition.empty() && e.value.op == ground::ExprOp::Constant &&
+                 (e.op == kairos::ast::AssignOp::Increase ||
+                 e.op == kairos::ast::AssignOp::Decrease) &&
+                 e.fluent < g_.init_numeric.size() && g_.init_numeric[e.fluent].has_value();
+        };
       for (const ground::Action & a : g_.actions) {
-        if (!a.effects.empty() || !plain(a.precondition)) {
+        if (!std::all_of(a.effects.begin(), a.effects.end(), cost) || !plain(a.precondition)) {
           result.message = "the search by satisfiability takes no conditional effects or numbers";
           return true;
         }

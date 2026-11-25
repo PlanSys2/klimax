@@ -76,6 +76,10 @@ state or an effect gives it one: a comparison that reads it does not hold, and a
 an effect that reads it (or that divides by zero) is not applicable. All the effects of an
 action read the state before it.
 
+The metric of the problem (`(:metric minimize e)` or `maximize`) is the value of `e` in the
+state the plan ends in; it does not change which plans are valid. **[decision]** As in the
+action costs of PDDL, `(total-cost)` starts at 0 when the initial state does not say.
+
 ### 3.2 L3: temporal
 
 Every task occurrence `t` has two time points, `start(t)` and `end(t)`, with

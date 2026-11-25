@@ -93,6 +93,10 @@ public:
   /// The values that numeric conditions and effects read from then on (none: no numbers)
   void numbers(const Values * values) {values_ = values;}
 
+  /// Whether (total-cost) is kept like any other fluent. Not by default: a cost that nothing
+  /// reads does not change which plans are valid, and tells apart states that are the same
+  void costs(bool kept) {costs_ = kept;}
+
   // The value of a numeric expression, if all it reads has one
   std::optional<double> number(ast::ExprId id, const Env & env)
   {
@@ -265,9 +269,8 @@ public:
         deletes.push_back(atom(e.name, e.args, env));
         return;
       case ast::EffectKind::Assign: {
-          // Action costs do not change which plans are valid; anything else is numeric
           const ast::Expr & target = nodes_.exprs[e.target];
-          if (std::string_view(symbols_.name(target.name)) == "total-cost") {
+          if (!costs_ && std::string_view(symbols_.name(target.name)) == "total-cost") {
             return;
           }
           if (changes == nullptr || target.kind != ast::ExprKind::Function) {
@@ -409,6 +412,7 @@ private:
   std::vector<uint32_t> predicates_;
   std::vector<uint32_t> functions_;
   const Values * values_ = nullptr;
+  bool costs_ = false;
 };
 
 }  // namespace klimax::verifier

@@ -22,11 +22,13 @@
 #include <limits>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <random>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -71,6 +73,7 @@ struct Choice
   size_t nodes = 0;
   size_t trail = 0;
   size_t executed = 0;
+  uint64_t spent = 0;
   uint64_t state_hash = 0;
 };
 
@@ -363,9 +366,11 @@ class Search
 {
 public:
   Search(const tdg::Problem & problem, kairos::Budget * budget)
-  : p_(problem), m_(problem.model), g_(problem.pddl), budget_(budget) {}
+  : p_(problem), m_(problem.model), g_(problem.pddl), budget_(budget),
+    hidden_(problem.pddl.numeric_fluents.size(), false) {}
 
-  // Shorter plans than the one in `result`, until there is none or the budget runs out
+  // Better plans than the one in `result`, until there is none or the budget runs out: cheaper
+  // by the metric if it is a sum of action costs, shorter if there is no metric
   void improve(Result & result, const Options & options)
   {
     result.plans = 1;
@@ -375,39 +380,68 @@ public:
     relaxed_ = free_.get();
     guided_ = false;
     limit_ = ~uint64_t{0};
-    while (result.steps > 0) {
+    if (metric_ == Metric::Other) {
+      improve_value(result, options);
+      return;
+    }
+    const char * what = "depth first, fixed order, under the length of the plan before";
+    bool proves = true;
+    if (metric_ == Metric::Costs) {
+      what = "depth first, fixed order, under the cost of the plan before";
+      measure_ = weight_;
+      if (free_actions_) {
+        // Actions that cost nothing: any number of them fits under a bound on the cost, and
+        // the search would not end. Each counts one besides, and a unit of cost as many as a
+        // plan twice as long as the first: plans much longer than that are not looked for,
+        // and running out of them proves nothing
+        const uint64_t unit = 2 * uint64_t{result.steps} + 16;
+        for (uint64_t & w : measure_) {
+          w = std::min(kInfinite, w * unit + 1);
+        }
+        proves = false;
+      }
+      least(task_cost_, method_cost_);
+    }
+    uint64_t best = measure_of(result.plan);
+    while (best > 0) {
       Result shorter;
-      const Outcome outcome = iteration(result.steps - 1, shorter);
+      const Outcome outcome = best > kInfinite ? Outcome::OutOfBudget :
+        iteration(best - 1, shorter);
       result.expansions = expansions_;
       if (outcome != Outcome::Solved) {
         // The whole space under the bound was searched: in one order of each network only,
         // if the problem is partially ordered
-        result.optimal = outcome == Outcome::Unsolvable && !linearized_;
+        result.optimal = outcome == Outcome::Unsolvable && !linearized_ && proves;
         if (outcome == Outcome::Unsolvable && linearized_) {
-          improve_interleaving(result, options);  // none shorter in this order: in any?
+          // None better in this order: in any?
+          improve_interleaving(result, options, best, proves);
         }
         return;
       }
       result.plan = std::move(shorter.plan);
       result.steps = shorter.steps;
-      result.message = "depth first, fixed order, under the length of the plan before";
+      result.message = what;
+      best = measure_of(result.plan);
       ++result.plans;
       if (options.on_plan) {
         options.on_plan(result.plan, result.steps);
       }
     }
-    result.optimal = true;
+    result.optimal = proves;
   }
 
   // The same over partially ordered networks, interleaving: best first under the bound, from
   // scratch each time. Exhausting it is a proof.
-  void improve_interleaving(Result & result, const Options & options)
+  void improve_interleaving(Result & result, const Options & options, uint64_t best, bool proves)
   {
     if (free_ == nullptr) {
       return;
     }
     limit_ = ~uint64_t{0};
-    while (result.steps > 0) {
+    while (best > 0) {
+      if (best > 0x7fffffffull) {
+        return;  // the nodes count what is done in 32 bits
+      }
       // First without the relaxation, which costs more than it saves when the space under the
       // bound is small; with it if that runs out of its memory
       Result shorter;
@@ -421,7 +455,7 @@ public:
         po_fewest_.clear();
         po_ids_ = 0;
         po_over_ = false;
-        po_bound_ = result.steps - 1;
+        po_bound_ = best - 1;
         po_plain_ = plain;
         shorter = Result();
         outcome = partial_order(shorter);
@@ -431,18 +465,53 @@ public:
       }
       result.expansions = expansions_;
       if (outcome != Outcome::Solved) {
-        result.optimal = outcome == Outcome::Unsolvable;
+        result.optimal = outcome == Outcome::Unsolvable && proves;
         return;
       }
       result.plan = std::move(shorter.plan);
       result.steps = bf_steps_;
-      result.message = "best first, partial order, under the length of the plan before";
+      result.message = measure_.empty() ?
+        "best first, partial order, under the length of the plan before" :
+        "best first, partial order, under the cost of the plan before";
+      best = measure_of(result.plan);
       ++result.plans;
       if (options.on_plan) {
         options.on_plan(result.plan, result.steps);
       }
     }
-    result.optimal = true;
+    result.optimal = proves;
+  }
+
+  // A metric that is not a sum of action costs: plans with a better value among those no longer
+  // than the last one, in the order of each network. Running out of them proves nothing: a
+  // longer plan may be better
+  void improve_value(Result & result, const Options & options)
+  {
+    std::optional<double> value = value_of(result.plan);
+    while (value) {
+      target_ = value;
+      Result better;
+      const Outcome outcome = iteration(result.steps, better);
+      target_.reset();
+      result.expansions = expansions_;
+      if (outcome != Outcome::Solved) {
+        return;
+      }
+      result.plan = std::move(better.plan);
+      result.steps = better.steps;
+      result.message = "depth first, fixed order, under the value of the plan before";
+      value = value_of(result.plan);
+      ++result.plans;
+      if (options.on_plan) {
+        options.on_plan(result.plan, result.steps);
+      }
+    }
+  }
+
+  // The value of the metric at the end of a plan, if the problem has one
+  std::optional<double> cost(const std::string & plan)
+  {
+    return metric_ == Metric::None ? std::nullopt : value_of(plan);
   }
 
   bool linearized() const {return linearized_;}
@@ -473,6 +542,7 @@ public:
     lap("orders");
     costs();
     lap("costs");
+    metric();
     infer();
     lap("infer");
     if (std::getenv("KLIMAX_NO_HEURISTIC") == nullptr) {
@@ -666,6 +736,7 @@ private:
     numeric_trail_.clear();
     cells_.clear();
     executed_.clear();
+    spent_ = 0;
     choices_.clear();
     choice_task_.clear();
     seen_.clear();
@@ -680,7 +751,7 @@ private:
         return Outcome::OutOfBudget;
       }
       if (top_ == kNone) {
-        if (holds(g_.goal)) {
+        if (holds(g_.goal) && improves()) {
           result.plan = plan();
           result.steps = executed_.size();
           return Outcome::Solved;
@@ -705,6 +776,7 @@ private:
         }
         apply(*action);
         executed_.push_back(cell.node);
+        spent_ += measure(cell.task);
         top_ = cell.next;
         found = true;
         continue;
@@ -714,15 +786,15 @@ private:
     return Outcome::Unsolvable;
   }
 
-  // The fewest actions each task and method can be decomposed into, whatever the state; and
-  // the methods of each task from the one that needs fewest
-  void costs()
+  // The least each task and method can be decomposed into, whatever the state: actions, or
+  // what they weigh in measure_
+  void least(std::vector<uint64_t> & task_cost, std::vector<uint64_t> & method_cost) const
   {
-    task_cost_.assign(p_.tasks.size(), kInfinite);
-    method_cost_.assign(p_.methods.size(), kInfinite);
+    task_cost.assign(p_.tasks.size(), kInfinite);
+    method_cost.assign(p_.methods.size(), kInfinite);
     for (size_t t = 0; t < p_.tasks.size(); ++t) {
       if (!p_.tasks[t].actions.empty()) {
-        task_cost_[t] = 1;
+        task_cost[t] = measure(static_cast<uint32_t>(t));
       }
     }
     for (bool changed = true; changed; ) {
@@ -730,18 +802,25 @@ private:
       for (size_t m = 0; m < p_.methods.size(); ++m) {
         uint64_t sum = 0;
         for (uint32_t t : p_.methods[m].subtasks) {
-          sum = std::min(kInfinite, sum + task_cost_[t]);
+          sum = std::min(kInfinite, sum + task_cost[t]);
         }
-        if (sum < method_cost_[m]) {
-          method_cost_[m] = sum;
+        if (sum < method_cost[m]) {
+          method_cost[m] = sum;
           const uint32_t parent = p_.methods[m].task;
-          if (parent != kNone && sum < task_cost_[parent]) {
-            task_cost_[parent] = sum;
+          if (parent != kNone && sum < task_cost[parent]) {
+            task_cost[parent] = sum;
             changed = true;
           }
         }
       }
     }
+  }
+
+  // The fewest actions each task and method can be decomposed into, whatever the state; and
+  // the methods of each task from the one that needs fewest
+  void costs()
+  {
+    least(task_cost_, method_cost_);
     auto sorted = [&](std::vector<uint32_t> methods) {
         std::stable_sort(methods.begin(), methods.end(), [&](uint32_t a, uint32_t b) {
             return method_cost_[a] < method_cost_[b];
@@ -1381,6 +1460,12 @@ private:
     return x ^ (x >> 33);
   }
 
+  // Nothing for a fluent that tells no states apart (hidden_)
+  uint64_t vhash(uint32_t fluent, double value) const
+  {
+    return hidden_[fluent] ? 0 : value_hash(fluent, value);
+  }
+
   static bool supported(const ground::Expr & e)
   {
     switch (e.op) {
@@ -1491,13 +1576,252 @@ private:
     return true;
   }
 
+  // --- The metric ------------------------------------------------------------------------------
+  // Action costs: the metric adds up fluents that nothing reads, and every action changes the
+  // sum by a constant that does not make it worse. Plans are then compared by that sum, as
+  // whole numbers (weight_). Any other metric over fluents is only evaluated at the end of a
+  // plan. A fluent that nothing reads and that always has a value is not part of the state.
+
+  static void reads(const ground::Expr & e, std::vector<bool> & out)
+  {
+    if (e.op == ground::ExprOp::Fluent) {
+      out[e.fluent] = true;
+    }
+    for (const ground::Expr & c : e.children) {
+      reads(c, out);
+    }
+  }
+
+  static void reads(const ground::Condition & c, std::vector<bool> & out)
+  {
+    for (const ground::NumericCondition & n : c.numeric) {
+      reads(n.lhs, out);
+      reads(n.rhs, out);
+    }
+  }
+
+  static bool constant(const ground::Expr & e, double & value)
+  {
+    if (e.op == ground::ExprOp::Constant) {
+      value = e.value;
+      return true;
+    }
+    return false;
+  }
+
+  // `e` times `k` as a sum of fluents with coefficients; false if it is not one
+  static bool linear(const ground::Expr & e, double k, std::vector<double> & coefficients)
+  {
+    double by = 0.0;
+    switch (e.op) {
+      case ground::ExprOp::Constant:
+        return true;
+      case ground::ExprOp::Fluent:
+        coefficients[e.fluent] += k;
+        return true;
+      case ground::ExprOp::Add:
+        return std::all_of(e.children.begin(), e.children.end(),
+                 [&](const ground::Expr & c) {return linear(c, k, coefficients);});
+      case ground::ExprOp::Sub:
+        return linear(e.children.at(0), k, coefficients) &&
+               linear(e.children.at(1), -k, coefficients);
+      case ground::ExprOp::Neg:
+        return linear(e.children.at(0), -k, coefficients);
+      case ground::ExprOp::Mul:
+        if (e.children.size() != 2) {
+          return false;
+        }
+        if (constant(e.children[0], by)) {
+          return linear(e.children[1], k * by, coefficients);
+        }
+        return constant(e.children[1], by) && linear(e.children[0], k * by, coefficients);
+      case ground::ExprOp::Div:
+        return constant(e.children.at(1), by) && by != 0.0 &&
+               linear(e.children.at(0), k / by, coefficients);
+      default:
+        return false;
+    }
+  }
+
+  void metric()
+  {
+    const size_t nf = g_.numeric_fluents.size();
+    const ground::Metric & mt = g_.metric;
+    const bool given = !mt.is_default && supported(mt.expr);
+    // plain: always with a value, whatever the state
+    std::vector<bool> read(nf, false), in_metric(nf, false), plain(nf, false);
+    for (size_t f = 0; f < nf; ++f) {
+      plain[f] = f < g_.init_numeric.size() && g_.init_numeric[f].has_value();
+    }
+    for (const ground::Action & a : g_.actions) {
+      reads(a.precondition, read);
+      for (const ground::Effect & e : a.effects) {
+        reads(e.condition, read);
+        reads(e.start_condition, read);
+        if (e.kind == ground::Effect::Kind::Numeric) {
+          reads(e.value, read);
+          double by = 0.0;
+          const bool adds = e.op == kairos::ast::AssignOp::Assign ||
+            e.op == kairos::ast::AssignOp::Increase || e.op == kairos::ast::AssignOp::Decrease;
+          plain[e.fluent] = plain[e.fluent] && adds && constant(e.value, by) && std::isfinite(by);
+        }
+      }
+    }
+    reads(g_.goal, read);
+    if (given) {
+      reads(mt.expr, in_metric);
+    }
+    std::vector<double> coefficients(nf, 0.0);
+    bool costs = given && linear(mt.expr, mt.minimize ? 1.0 : -1.0, coefficients);
+    bool any = false;
+    for (size_t f = 0; f < nf; ++f) {
+      if (coefficients[f] != 0.0) {
+        any = true;
+        costs = costs && !read[f] && plain[f];
+      }
+    }
+    costs = costs && any;
+    std::vector<double> change(g_.actions.size(), 0.0);
+    for (size_t a = 0; a < g_.actions.size() && costs; ++a) {
+      for (const ground::Effect & e : g_.actions[a].effects) {
+        if (e.kind != ground::Effect::Kind::Numeric || coefficients[e.fluent] == 0.0) {
+          continue;
+        }
+        if (!e.condition.empty() || !e.start_condition.empty() ||
+          e.op == kairos::ast::AssignOp::Assign)
+        {
+          costs = false;
+          break;
+        }
+        change[a] += coefficients[e.fluent] *
+          (e.op == kairos::ast::AssignOp::Increase ? e.value.value : -e.value.value);
+      }
+    }
+    // The instances of a task differ in the precondition only
+    std::vector<double> of_task(p_.tasks.size(), 0.0);
+    double most = 0.0;
+    for (size_t t = 0; t < p_.tasks.size() && costs; ++t) {
+      for (uint32_t a : p_.tasks[t].actions) {
+        of_task[t] = change[p_.tasks[t].actions[0]];
+        costs = costs && std::abs(change[a] - of_task[t]) <= 1e-9 && of_task[t] >= -1e-9;
+      }
+      of_task[t] = std::max(of_task[t], 0.0);
+      most = std::max(most, of_task[t]);
+    }
+    // As whole numbers: tenths, hundredths... if they are not
+    double scale = 1.0;
+    auto whole = [&]() {
+        return std::all_of(of_task.begin(), of_task.end(), [&](double c) {
+                   const double x = c * scale;
+                   return std::abs(x - std::round(x)) <= 1e-9 * std::max(1.0, x);
+                 });
+      };
+    while (costs && !whole() && scale < 1e6) {
+      scale *= 10.0;
+    }
+    costs = costs && whole() && most * scale < 1e12;
+    if (costs) {
+      metric_ = Metric::Costs;
+      weight_.assign(p_.tasks.size(), 0);
+      for (size_t t = 0; t < p_.tasks.size(); ++t) {
+        weight_[t] = static_cast<uint64_t>(std::llround(of_task[t] * scale));
+        free_actions_ = free_actions_ || (!p_.tasks[t].actions.empty() && weight_[t] == 0);
+      }
+    } else if (given && std::find(in_metric.begin(), in_metric.end(), true) != in_metric.end()) {
+      metric_ = Metric::Other;
+    }
+    for (size_t f = 0; f < nf; ++f) {
+      hidden_[f] = !read[f] && plain[f] && (!in_metric[f] || metric_ == Metric::Costs);
+    }
+  }
+
+  uint64_t measure(uint32_t task) const {return measure_.empty() ? 1 : measure_[task];}
+
+  // The tasks of the actions of a plan written by this search, in order
+  bool actions_of(const std::string & plan, std::vector<uint32_t> & out)
+  {
+    if (primitive_.empty()) {
+      for (uint32_t t = 0; t < p_.tasks.size(); ++t) {
+        if (!p_.tasks[t].actions.empty()) {
+          primitive_.emplace(name(t), t);
+        }
+      }
+    }
+    out.clear();
+    for (size_t at = plan.find('\n') + 1; at < plan.size(); ) {
+      const size_t end = std::min(plan.find('\n', at), plan.size());
+      const std::string_view line(plan.data() + at, end - at);
+      at = end + 1;
+      if (line.starts_with("root")) {
+        return true;
+      }
+      const size_t space = line.find(' ');
+      const auto found = space == std::string_view::npos ? primitive_.end() :
+        primitive_.find(std::string(line.substr(space + 1)));
+      if (found == primitive_.end()) {
+        return false;
+      }
+      out.push_back(found->second);
+    }
+    return false;
+  }
+
+  // What a plan adds up to in the measure of the bound; beyond any bound if it cannot be read
+  uint64_t measure_of(const std::string & plan)
+  {
+    std::vector<uint32_t> tasks;
+    if (!actions_of(plan, tasks)) {
+      return kInfinite + 1;
+    }
+    uint64_t sum = 0;
+    for (uint32_t t : tasks) {
+      sum = std::min(kInfinite + 1, sum + measure(t));
+    }
+    return sum;
+  }
+
+  // The value of the metric in the state a plan ends in. Leaves the state there
+  std::optional<double> value_of(const std::string & plan)
+  {
+    std::vector<uint32_t> tasks;
+    if (!actions_of(plan, tasks)) {
+      return std::nullopt;
+    }
+    initial_state();
+    for (uint32_t t : tasks) {
+      const auto & instances = p_.tasks[t].actions;
+      const auto a = std::find_if(instances.begin(), instances.end(),
+          [&](uint32_t i) {return can(g_.actions[i]);});
+      if (a == instances.end()) {
+        return std::nullopt;
+      }
+      apply(g_.actions[*a]);
+    }
+    trail_.clear();
+    numeric_trail_.clear();
+    const double value = number(g_.metric.expr);
+    return std::isfinite(value) ? std::optional<double>(value) : std::nullopt;
+  }
+
+  // With a value to improve on: the metric in this state does
+  bool improves() const
+  {
+    if (!target_) {
+      return true;
+    }
+    const double value = number(g_.metric.expr);
+    const double margin = 1e-9 * std::max(1.0, std::abs(*target_));
+    return std::isfinite(value) &&
+           (g_.metric.minimize ? value < *target_ - margin : value > *target_ + margin);
+  }
+
   void set_value(uint32_t fluent, double value)
   {
     const double old = values_[fluent];
     if (old == value || (old != old && value != value)) {
       return;
     }
-    const uint64_t change = value_hash(fluent, old) ^ value_hash(fluent, value);
+    const uint64_t change = vhash(fluent, old) ^ vhash(fluent, value);
     state_hash_ ^= change;
     numeric_hash_ ^= change;
     numeric_trail_.emplace_back(fluent, old);
@@ -1511,7 +1835,7 @@ private:
     if (a == kNumericMark) {
       const auto [fluent, old] = numeric_trail_.back();
       numeric_trail_.pop_back();
-      numeric_hash_ ^= value_hash(fluent, values_[fluent]) ^ value_hash(fluent, old);
+      numeric_hash_ ^= vhash(fluent, values_[fluent]) ^ vhash(fluent, old);
       values_[fluent] = old;
       return;
     }
@@ -1536,7 +1860,7 @@ private:
       if (f < g_.init_numeric.size() && g_.init_numeric[f]) {
         values_[f] = *g_.init_numeric[f];
       }
-      numeric_hash_ ^= value_hash(f, values_[f]);
+      numeric_hash_ ^= vhash(f, values_[f]);
     }
     state_hash_ ^= numeric_hash_;
   }
@@ -1741,7 +2065,7 @@ private:
     numeric_hash_ = 0;
     for (size_t f = 0; f < n; ++f) {
       values_[f] = kept[size_t{index} * n + f];
-      numeric_hash_ ^= value_hash(static_cast<uint32_t>(f), values_[f]);
+      numeric_hash_ ^= vhash(static_cast<uint32_t>(f), values_[f]);
     }
   }
 
@@ -2285,7 +2609,7 @@ private:
           child.parent = n;
           child.did = item.id;
           child.did_task = item.task;
-          child.actions = node.actions + 1;
+          child.actions = node.actions + static_cast<uint32_t>(measure(item.task));
           po_replace(node, i, nullptr, child);
           const size_t mark = trail_.size();
           const uint64_t hash = state_hash_;
@@ -2577,7 +2901,7 @@ private:
       {
         nested += nodes_[a].task == task;
       }
-      if (nested > bound_ - std::min<uint64_t>(bound_, done_now) + 1) {
+      if (nested > bound_ - std::min<uint64_t>(bound_, spent_) + 1) {
         cut_ = true;
         return false;
       }
@@ -2592,6 +2916,7 @@ private:
       choice.nodes = nodes_.size();
       choice.trail = trail_.size();
       choice.executed = executed_.size();
+      choice.spent = spent_;
       choice.state_hash = state_hash_;
       const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
         order_[method.method];
@@ -2622,7 +2947,7 @@ private:
         nodes_.resize(choice.nodes);
         continue;  // something further down the stack can no longer be executed
       }
-      const uint64_t done = executed_.size();
+      const uint64_t done = spent_;
       const bool too_long = done + (top == kNone ? 0 : cells_[top].rest) > bound_;
       cut_ = cut_ || too_long;
       // Seen with as few actions done: nothing new from here
@@ -2672,6 +2997,7 @@ private:
       cells_.resize(choice.cells);
       nodes_.resize(choice.nodes);
       executed_.resize(choice.executed);
+      spent_ = choice.spent;
       top_ = choice.top;
       const uint32_t below = task == kNone ? kNone : cells_[top_].next;
       if (try_from(task, node, below, std::move(choice.candidates), choice.next_method)) {
@@ -2749,6 +3075,7 @@ private:
   std::vector<Cell> cells_;
   std::vector<Node> nodes_;             // 0 is the root above the initial tasks
   std::vector<uint32_t> executed_;      // nodes of the actions, in plan order
+  uint64_t spent_ = 0;                  // what they add up to: actions, or measure_
   uint32_t top_ = kNone;
   std::vector<Choice> choices_;
   std::vector<std::pair<uint32_t, uint32_t>> choice_task_;  // task and node of each choice
@@ -2843,7 +3170,16 @@ private:
   bool guided_ = true;               // this turn ranks the methods with relaxed_
   uint64_t work_ = 0;                // expansions, plus the cost of the evaluations
   uint64_t limit_ = ~uint64_t{0};    // work at which this turn ends
-  uint64_t bound_ = 0;
+  uint64_t bound_ = 0;                // on what is done: actions, or their measure_
+  // The metric of the problem, for the search of better plans
+  enum class Metric : uint8_t {None, Costs, Other};
+  Metric metric_ = Metric::None;
+  std::vector<bool> hidden_;          // numeric fluents that tell no states apart
+  std::vector<uint64_t> weight_;      // Costs: of each primitive task, as a whole number
+  bool free_actions_ = false;         // Costs: some action costs nothing
+  std::vector<uint64_t> measure_;     // what each primitive task counts under a bound; empty: 1
+  std::optional<double> target_;      // Other: the value a plan has to improve on
+  std::unordered_map<std::string, uint32_t> primitive_;  // by name, to read a plan back
   bool cut_ = false;  // some branch was cut by the bound in this iteration
   uint64_t expansions_ = 0;
 };
@@ -2869,6 +3205,7 @@ Result total_order(
         options.on_plan(result.plan, result.steps);
       }
     }
+    result.cost = search.cost(result.plan);
   }
   if (result.outcome == Outcome::Unsolvable && !problem.model.total_order && !search.proved_) {
     result.outcome = Outcome::Unsupported;

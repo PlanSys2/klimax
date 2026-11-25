@@ -33,7 +33,12 @@ in [baseline.md](baseline.md).
   The heuristics do not see the numbers: where a resource decides the plan (fuel), what
   finds it is the search, which counts every pending task at least by the fewest actions it
   takes, so that repeating a detour is never free.
-- **Anytime and optimal** (H4): after the first plan Klimax looks for shorter ones and proves
+- **Metric and action costs** (H5): the value of the problem's metric is given with every plan
+  and by the verifier. When the metric adds up action costs (`(increase (total-cost) ...)` by
+  constants or static functions, or any sum of fluents that nothing reads), the anytime search
+  bounds the cost instead of the length and proves the cheapest plan, with total and with
+  partial order. A fluent that nothing reads is no longer part of the state.
+- **Anytime and optimal** (H4): after the first plan Klimax looks for better ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans
   and a compiler for hierarchical problems.
@@ -56,7 +61,12 @@ in [baseline.md](baseline.md).
 ## Known limits
 
 - Durative actions and temporal constraints are read by neither the planner nor the verifier
-  yet: they are reported as not supported, never accepted. Of numbers, object fluents and the
-  metric are not read either.
+  yet: they are reported as not supported, never accepted. Of numbers, object fluents are not
+  read either.
+- The first plan is found without looking at the metric: only the anytime search uses it. With
+  actions that cost nothing the cheapest plan is looked for among plans up to about twice as
+  long as the first, and is not proved the cheapest. A metric that is not a sum of action
+  costs (one that reads the state, or to maximize) is improved among the plans that are no
+  longer than the last, without a proof.
 - With partial order, "unsolvable" is only answered when the search that interleaves exhausts
   its space; otherwise the answer is "not supported", with the reason.

@@ -33,8 +33,9 @@ void print_usage(std::ostream & out)
       << "       klimax --version | --help\n"
       << "Klimax, an HTN planner for HDDL 2.1. It plans HDDL 1.0 with numeric fluents for now;\n"
       << "the plan and its decomposition are written in the format of the IPC HTN tracks.\n"
-      << "  --anytime go on after the first plan, looking for shorter ones, until none is\n"
-      << "            left or the time runs out; the shortest found is written\n"
+      << "  --anytime go on after the first plan, looking for better ones (cheaper by the\n"
+      << "            metric of the problem, shorter if it has none), until none is left or\n"
+      << "            the time runs out; the best found is written\n"
       << "  --no-verify  do not check the plan with the verifier before writing it\n"
       << "  --check   read the domain and the problem and report every error\n"
       << "  --verify  check a plan in the format of the IPC HTN tracks\n"
@@ -131,8 +132,11 @@ int solve(
   }
   std::cerr << "; " << klimax::to_string(r.status) << (r.message.empty() ? "" : ": ") << r.message
             << "; ground " << r.ground_ms << " ms, search " << r.search_ms << " ms, "
-            << r.expansions << " expansions" << (r.optimal ? "; no shorter plan exists" : "")
-            << "\n";
+            << r.expansions << " expansions";
+  if (r.cost) {
+    std::cerr << "; metric " << *r.cost;
+  }
+  std::cerr << (r.optimal ? "; no better plan exists" : "") << "\n";
   switch (r.status) {
     case klimax::Status::Solved:
       std::cout << r.plan;
@@ -164,6 +168,9 @@ int verify(const char * domain_path, const char * problem_path, const char * pla
     return 1;
   }
   std::cout << "Plan verification result: true\n";
+  if (r.metric) {
+    std::cout << "Plan metric: " << *r.metric << "\n";
+  }
   return 0;
 }
 

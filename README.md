@@ -44,8 +44,9 @@ the method in [docs/results.md](docs/results.md) and [docs/baseline.md](docs/bas
 - **Plans** totally and partially ordered problems, with method preconditions, constraints
   between variables and the conditions and effects of ADL.
 - **Proves** when a problem has no plan, instead of running out of time.
-- **Anytime**: after the first plan it goes on to shorter ones and, when none is left, says that
-  the plan is the shortest.
+- **Anytime**: after the first plan it goes on to better ones and, when none is left, says that
+  the plan is the best: the cheapest by the metric of the problem when it adds up action costs,
+  the shortest when there is no metric.
 - **Verifies** hierarchical plans in the format of the IPC, independently of the planner, and
   its own before returning them: a plan the verifier rejects is reported as an internal error,
   never given.
@@ -58,7 +59,7 @@ the method in [docs/results.md](docs/results.md) and [docs/baseline.md](docs/bas
 
 ```
 klimax DOMAIN PROBLEM [--timeout S]           # the plan and its decomposition, in the IPC format
-klimax DOMAIN PROBLEM --timeout S --anytime   # go on to shorter plans; says if none is shorter
+klimax DOMAIN PROBLEM --timeout S --anytime   # go on to better plans; says if none is better
 klimax DOMAIN PROBLEM --no-verify             # skip the check of the plan before writing it
 klimax --check DOMAIN PROBLEM                 # read the input and report every error
 klimax --verify DOMAIN PROBLEM PLAN           # check a plan in the format of the IPC HTN tracks

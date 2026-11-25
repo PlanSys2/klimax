@@ -22,14 +22,18 @@ if result.status == klimax.Status.SOLVED:
   Every plan is verified, independently of the search, before it is returned (`verify`).
   With `decomposition` it is also given as steps: of each task, its method, the values of the method's parameters and which
   step is each of its subtasks.
-  With `anytime=True` it goes on after the first plan looking for shorter ones, calling
+  With `anytime=True` it goes on after the first plan looking for better ones, calling
   `on_plan(plan, steps)` with each, until none is left or the time runs out; `optimal` says
-  whether the last one was proved the shortest.
+  whether the last one was proved the best. Better is cheaper by the `:metric` of the problem
+  when it adds up action costs, shorter when there is none. `cost` is the value of the metric
+  for the plan (`None` without one).
 - `check(domain, problem)`: every error found, with file, line and column.
 - `verify(domain, problem, plan, decomposition=False)`: whether a plan in the IPC format
-  solves the problem, and why not; with `decomposition`, a valid plan also as steps.
+  solves the problem, and why not; with `decomposition`, a valid plan also as steps. `metric`
+  is the value of the problem's metric at the end of a valid plan.
 
-Hierarchical problems with total or partial order and numeric fluents; without time. To build from
+Hierarchical problems with total or partial order, numeric fluents and action costs; without
+time. To build from
 source, Kairos must be installed with `-DKAIROS_INSTALL_CORE=ON`:
 
 ```

@@ -18,6 +18,7 @@
 #ifndef KLIMAX__VERIFY__VERIFIER_HPP_
 #define KLIMAX__VERIFY__VERIFIER_HPP_
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +32,9 @@ struct Outcome
 {
   bool valid = false;
   std::string reason;  // why not, in one sentence; empty if valid
+  // Valid, and the problem has a metric that does not read time: its value at the end of the
+  // plan (none if it reads a fluent with no value)
+  std::optional<double> metric;
 };
 
 /// @brief A step of a verified plan: an action, or a task with the method that decomposes it.

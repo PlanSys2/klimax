@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <map>
 #include <new>
@@ -519,6 +520,7 @@ SolveResult solve(
   result.steps = found.steps;
   result.plans = found.plans;
   result.optimal = found.optimal;
+  result.cost = found.cost;
   result.message = std::move(found.message);
   switch (found.outcome) {
     case search::Outcome::Solved:
@@ -526,7 +528,10 @@ SolveResult solve(
       {
         const Spelling spelling = spelling_of(domain, problem);
         result.plan = with_original_names(found.plan, spelling);
-        if (options.verify || options.decomposition) {
+        // The verifier is also who values a plan of a search that does not (found.cost)
+        if (options.verify || options.decomposition ||
+          (model.value().problem.metric && !found.cost))
+        {
           verifier::Tree tree;
           const verifier::Outcome checked = verifier::verify(
             model.value(), found.plan, options.decomposition ? &tree : nullptr);
@@ -536,6 +541,15 @@ SolveResult solve(
             result.plan.clear();
             break;
           }
+          if (checked.metric && found.cost && std::abs(*checked.metric - *found.cost) >
+            1e-6 * std::max(1.0, std::abs(*checked.metric)))
+          {
+            result.status = Status::InternalError;
+            result.message = "the search and the verifier value the plan differently";
+            result.plan.clear();
+            break;
+          }
+          result.cost = checked.metric;
           if (options.decomposition) {
             fill(result, tree, spelling);
           }
@@ -591,6 +605,7 @@ VerifyResult verify(
     model.value(), plan, decomposition ? &tree : nullptr);
   result.valid = outcome.valid;
   result.reason = std::move(outcome.reason);
+  result.metric = outcome.metric;
   if (result.valid && decomposition) {
     fill(result, tree, spelling_of(domain, problem));
   }

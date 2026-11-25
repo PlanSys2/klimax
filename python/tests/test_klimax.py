@@ -146,5 +146,20 @@ def test_numbers():
     assert klimax.solve(TRIP_DOMAIN, dry, timeout=10).status == klimax.Status.UNSOLVABLE
 
 
+def test_metric():
+    # With a station at b and another at c: filling up at c leaves more fuel at the end
+    stations = (TRIP % "(station b) (station c)").rstrip()[:-1]
+    for metric, left in (("maximize", 2.0), ("minimize", 0.0)):
+        problem = stations + " (:metric %s (fuel)))" % metric
+        result = klimax.solve(TRIP_DOMAIN, problem, timeout=10, anytime=True)
+        assert result.status == klimax.Status.SOLVED, result.message
+        assert result.cost == left, result.plan
+        assert klimax.verify(TRIP_DOMAIN, problem, result.plan).metric == left
+    # No metric, no value
+    result = klimax.solve(TRIP_DOMAIN, TRIP % "(station b)", timeout=10)
+    assert result.cost is None
+    assert klimax.verify(TRIP_DOMAIN, TRIP % "(station b)", result.plan).metric is None
+
+
 def test_version():
     assert klimax.__version__.count(".") == 2

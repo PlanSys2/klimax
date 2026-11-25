@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "core/budget.hpp"
@@ -38,9 +39,9 @@ enum class Outcome : uint8_t
 
 struct Options
 {
-  // Once a plan is found, look for shorter ones until none is left or the budget runs out
+  // Once a plan is found, look for better ones until none is left or the budget runs out
   bool anytime = false;
-  // Called with every plan found, each shorter than the one before (the last one is the result)
+  // Called with every plan found, each better than the one before (the last one is the result)
   std::function<void(const std::string & plan, size_t steps)> on_plan;
 };
 
@@ -51,8 +52,9 @@ struct Result
   std::string message;  // Unsupported: what; otherwise, which way of searching answered
   size_t steps = 0;         // actions of the plan
   uint64_t expansions = 0;  // tasks taken from the stack
-  size_t plans = 0;         // found, each shorter than the one before
-  bool optimal = false;     // proved: no plan has fewer actions
+  size_t plans = 0;         // found, each better than the one before
+  bool optimal = false;     // proved: no plan is better (see total_order())
+  std::optional<double> cost;  // the metric of the problem at the end of the plan, if it has one
 };
 
 /**
@@ -77,6 +79,15 @@ struct Result
  * of one action fewer than the best plan so far, until the space under the bound is exhausted or
  * the budget runs out. With partial order, the search that interleaves then does the same.
  * Exhausted, the plan is the shortest (`Result::optimal`).
+ *
+ * What makes a plan better is the metric of the problem:
+ * - None: fewer actions.
+ * - Action costs (it adds up fluents that nothing reads, and each action changes the sum by a
+ *   constant that does not make it worse): a lower sum, with the bound on it instead of on the
+ *   length. If some action costs nothing, only plans up to about twice as long as the first are
+ *   looked for, and exhausting them is no proof.
+ * - Any other over the fluents: a better value at the end, among the plans no longer than the
+ *   last one and in one order of each network. Never a proof.
  */
 Result total_order(
   const tdg::Problem & problem, kairos::Budget * budget = nullptr, const Options & options = {});

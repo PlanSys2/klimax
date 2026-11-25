@@ -43,6 +43,14 @@ const char * kDomain =
   " (:task tour :parameters (?r - robot))\n"
   " (:task fly :parameters (?r - robot ?to - room))\n"
   " (:task walk :parameters (?r - robot ?to - room))\n"
+  " (:task pace :parameters (?r - robot))\n"
+  " (:task hop :parameters (?r - robot))\n"
+  " (:method pace-more :parameters (?r - robot ?x ?y - room) :task (pace ?r)\n"
+  "  :precondition (and (at ?r ?x) (link ?x ?y))\n"
+  "  :ordered-subtasks (and (move ?r ?x ?y) (move ?r ?y ?x) (pace ?r) (look ?r ?x)))\n"
+  " (:method pace-stop :parameters (?r - robot) :task (pace ?r))\n"
+  " (:method hop-on :parameters (?r - robot ?from ?to - room) :task (hop ?r)\n"
+  "  :ordered-subtasks (and (look ?r ?from) (move ?r ?from ?to)))\n"
   " (:method walk-more :parameters (?r - robot ?mid ?to - room) :task (walk ?r ?to)\n"
   "  :precondition (link ?mid ?to) :ordered-subtasks (and (walk ?r ?mid) (move ?r ?mid ?to)))\n"
   " (:method walk-here :parameters (?r - robot ?to - room) :task (walk ?r ?to)\n"
@@ -187,6 +195,32 @@ TEST(LiftedTest, RecursionThatDoesNotProgress)
   // Without a plan, how many times `walk` should come from itself has no end: it gives up
   EXPECT_EQ(solve("(:htn :ordered-subtasks (and (walk r1 d)))", "(:goal (seen a))").result.outcome,
     Outcome::OutOfBudget);
+}
+
+TEST(LiftedTest, RecursionThatComesBackToTheSameState)
+{
+  // `pace` goes and comes back before it calls itself: the state is the same, with more to do
+  Solved s = solve("(:htn :ordered-subtasks (and (pace r1) (pace r2)))");
+  ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
+  EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
+  EXPECT_EQ(s.result.steps, 0u);  // the second time is cut, and the first one stops instead
+}
+
+TEST(LiftedTest, StatesAlreadySeen)
+{
+  // Going on from a room already left, with the same tasks pending, is the same search again
+  Solved s = solve("(:htn :ordered-subtasks (and (go r1 d) (fly r1 a)))");
+  EXPECT_EQ(s.result.outcome, Outcome::Unsolvable) << s.result.message;
+  EXPECT_LT(s.result.expansions, 100u);
+}
+
+TEST(LiftedTest, WhatLaterActionsRequire)
+{
+  // `hop-on` has no precondition: its rooms must be linked for `move`, which never changes
+  Solved s = solve("(:htn :ordered-subtasks (and (hop r1) (hop r1) (hop r2)))");
+  ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
+  EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
+  EXPECT_EQ(s.result.steps, 6u);
 }
 
 TEST(LiftedTest, TotalOrderOnly)

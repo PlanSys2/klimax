@@ -33,7 +33,10 @@ in [baseline.md](baseline.md).
 
 - A heuristic for the search that does not ground: it is depth first in the order of the
   domain, and most of the total-order problems whose ground form is too large (Snake,
-  Minecraft-Player, Hiking) are still out of its reach.
+  Minecraft-Player) are still out of its reach.
+- Woodworking and Monroe (partially observable): the methods leave many parameters free and
+  only the goal, at the end, says which values were right. The planners that solve them
+  (Lilotane, PDDL4J) encode the problem for a SAT solver.
 - Domains where a planner of the baseline solves more: Woodworking, Hiking, Blocksworld-GTOHP,
   Monroe (partially observable).
 - An optimal search with an admissible heuristic. With partial order, a proof that does not

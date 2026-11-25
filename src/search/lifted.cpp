@@ -16,7 +16,9 @@
 #include "search/lifted.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <set>
 #include <string>
@@ -67,6 +69,15 @@ struct Required
 {
   uint32_t predicate;
   std::vector<Arg> args;
+
+  bool operator==(const Required & other) const
+  {
+    return predicate == other.predicate && args.size() == other.args.size() &&
+           std::equal(args.begin(), args.end(), other.args.begin(),
+             [](const Arg & a, const Arg & b) {
+               return a.variable == b.variable && a.index == b.index;
+             });
+  }
 };
 
 // What a method or an action asks of its parameters (the initial task network too)
@@ -75,6 +86,7 @@ struct Schema
   std::vector<const sem::TypeSpec *> types;  // by parameter
   std::vector<bool> needed;      // a value is needed before going on: the rest can wait
   std::vector<Required> required;
+  size_t own = 0;                // the first ones are of its precondition; the rest, pulled up
   const ast::Action * condition = nullptr;   // its precondition, if any
   std::vector<uint32_t> condition_params;    // the parameter of each one of `condition`
   const hddl::Network * network = nullptr;   // methods: constraints and subtasks
@@ -88,6 +100,7 @@ struct Variable
 {
   uint32_t value = kNone;  // an object, or another variable it was made equal to
   std::vector<const sem::TypeSpec *> types;
+  std::vector<uint32_t> watch;  // the atoms in constraints_ that wait for its value
 };
 
 // A pending task; the ones after it follow by `next`
@@ -98,6 +111,7 @@ struct Cell
   uint32_t next;
   uint32_t node;   // its place in the decomposition
   uint64_t hash;   // of the task, its arguments and everything after
+  bool open;       // some argument, here or after, was a variable when it was made
 };
 
 struct Node
@@ -106,7 +120,7 @@ struct Node
   uint32_t args;
   uint32_t parent;
   uint32_t method = kNone;
-  uint32_t at = kNone;   // actions done when it was decomposed
+  uint64_t state = 0;    // the hash of the state when it was decomposed
 };
 
 // A way of decomposing a task or of doing an action: values for the parameters (kNone: left
@@ -146,6 +160,8 @@ struct Frame
   size_t variables;
   size_t bound;
   size_t typed;
+  size_t watched;
+  size_t constraints;
   uint64_t state_hash;
   uint64_t variables_hash;
   Choice start;               // Root, Action: what is known of the parameters
@@ -306,11 +322,20 @@ private:
         cut_ = true;
         continue;
       }
-      const uint64_t key = mix(state_hash_ ^ cell.hash ^ variables_hash_);
+      // The task with the values its arguments have now. The values given to variables count
+      // only if some pending task has one: otherwise the future does not depend on them
+      uint64_t pending = mix((cell.next == kNone ? 0 : cells_[cell.next].hash) + cell.task + 1);
+      bool open = cell.next != kNone && cells_[cell.next].open;
+      for (size_t i = 0; i < task.params.size(); ++i) {
+        const uint32_t v = value(args_[cell.args + i]);
+        pending = mix(pending ^ v);
+        open = open || v >= kVariable;
+      }
+      const uint64_t key = mix(state_hash_ ^ pending ^ (open ? variables_hash_ : 0));
       if (!fresh(key)) {
         continue;
       }
-      nodes_[cell.node].at = static_cast<uint32_t>(sequence_.size());
+      nodes_[cell.node].state = state_hash_;
       Frame frame;
       frame.cell = current;
       mark(frame);
@@ -320,20 +345,21 @@ private:
 
   static constexpr size_t kSeen = 5000000;     // tasks and states remembered
   static constexpr size_t kCells = 5000000;    // pending tasks made along one branch
+  static constexpr uint32_t kAncestors = 64;   // looked at for a recursion without progress
   static constexpr uint32_t kRepeats = 3;      // of a task from itself with nothing done
 
-  // The task comes from itself, with the same arguments and no action in between, more than
-  // `repeats_` times: a recursion that does not progress
+  // The task comes from itself, with the same arguments and in the same state, more than
+  // `repeats_` times: a recursion that does not progress. Looks kAncestors back
   bool again(const Cell & cell) const
   {
     const hddl::TaskInfo & task = m_.tasks[TaskId(cell.task)];
     uint32_t times = 0;
-    for (uint32_t n = nodes_[cell.node].parent; n != kNone; n = nodes_[n].parent) {
+    uint32_t back = 0;
+    for (uint32_t n = nodes_[cell.node].parent; n != kNone && back < kAncestors;
+      n = nodes_[n].parent, ++back)
+    {
       const Node & node = nodes_[n];
-      if (node.at != sequence_.size()) {
-        break;
-      }
-      if (node.task != cell.task) {
+      if (node.task != cell.task || node.state != state_hash_) {
         continue;
       }
       bool same = true;
@@ -358,7 +384,7 @@ private:
   Level level(const Schema & schema, Choice choice) const
   {
     Level l;
-    for (uint32_t r = 0; r < schema.required.size() && l.by == Level::By::Leaf; ++r) {
+    for (uint32_t r = 0; r < schema.own && l.by == Level::By::Leaf; ++r) {
       const std::vector<Arg> & args = schema.required[r].args;
       if (std::any_of(args.begin(), args.end(),
         [&](const Arg & x) {return x.variable && open(choice, x.index);}))
@@ -633,7 +659,118 @@ private:
         schema.condition = &a;
         schema.required = required_of(a, schema.condition_params);
       }
+      schema.own = schema.required.size();
     }
+    pull_up();
+  }
+
+  void changed(ast::EffectId id, std::vector<bool> & changes)
+  {
+    const ast::Effect & e = m_.pddl.nodes.effects[id];
+    if (e.kind == ast::EffectKind::Add || e.kind == ast::EffectKind::Delete) {
+      changes[domain_.predicate(e.name)] = true;
+    }
+    for (ast::EffectId c : e.children) {
+      changed(c, changes);
+    }
+  }
+
+  // The atoms of `from`, over the parameters of a task, for a step with those arguments
+  static void through(
+    const std::vector<Required> & from, const std::vector<Arg> & args, std::vector<Required> & to)
+  {
+    for (Required r : from) {
+      for (Arg & x : r.args) {
+        if (x.variable) {
+          x = args[x.index];
+        }
+      }
+      if (std::find(to.begin(), to.end(), r) == to.end()) {
+        to.push_back(std::move(r));
+      }
+    }
+  }
+
+  // An atom of a predicate that no action changes, required by an action, is required by
+  // every method that leads to it: checked there, a wrong choice of parameters is seen at
+  // once and not when the action comes. For a compound task, what all its methods require
+  void pull_up()
+  {
+    std::vector<bool> changes(m_.domain.predicates.items.size(), false);
+    for (const ast::Action & a : m_.pddl.actions) {
+      if (a.effect.valid()) {
+        changed(a.effect, changes);
+      }
+    }
+    auto fixed_of = [&](const std::vector<Required> & all) {
+        std::vector<Required> fixed;
+        std::copy_if(all.begin(), all.end(), std::back_inserter(fixed),
+          [&](const Required & r) {return !changes[r.predicate];});
+        return fixed;
+      };
+    auto with_steps = [&](const Schema & schema, const std::vector<std::vector<Required>> & of) {
+        std::vector<Required> all = fixed_of(schema.required);
+        for (const hddl::Step & step : schema.network->steps) {
+          through(of[step.task.value()], step.args, all);
+        }
+        return all;
+      };
+    std::vector<std::vector<Required>> of(m_.tasks.size());  // by task, over its parameters
+    for (uint32_t t = 0; t < m_.tasks.size(); ++t) {
+      if (m_.tasks[TaskId(t)].primitive) {
+        of[t] = fixed_of(actions_[t].required);
+      }
+    }
+    for (int round = 0; round < 4; ++round) {
+      for (uint32_t t = 0; t < m_.tasks.size(); ++t) {
+        if (m_.tasks[TaskId(t)].primitive) {
+          continue;
+        }
+        std::vector<Required> common;
+        bool first = true;
+        for (uint32_t m : m_.methods_of[t]) {
+          const hddl::MethodInfo & method = m_.methods[m];
+          std::vector<Required> mine;
+          for (Required r : with_steps(methods_[m], of)) {
+            bool usable = true;
+            for (Arg & x : r.args) {
+              if (!x.variable) {
+                continue;
+              }
+              size_t i = 0;
+              while (i < method.task_args.size() &&
+                !(method.task_args[i].variable && method.task_args[i].index == x.index))
+              {
+                ++i;
+              }
+              usable = usable && i < method.task_args.size();
+              x.index = static_cast<uint32_t>(i);
+            }
+            if (usable) {
+              mine.push_back(std::move(r));
+            }
+          }
+          if (first) {
+            common = std::move(mine);
+            first = false;
+          } else {
+            common.erase(std::remove_if(common.begin(), common.end(),
+              [&](const Required & r) {
+                return std::find(mine.begin(), mine.end(), r) == mine.end();
+              }), common.end());
+          }
+        }
+        of[t] = std::move(common);
+      }
+    }
+    auto extend = [&](Schema & schema) {
+        schema.own = schema.required.size();
+        for (const hddl::Step & step : schema.network->steps) {
+          through(of[step.task.value()], step.args, schema.required);
+        }
+      };
+    extend(initial_);
+    std::for_each(methods_.begin(), methods_.end(), extend);
   }
 
   static std::vector<uint32_t> order_of(const hddl::Network & net)
@@ -715,6 +852,8 @@ private:
     frame.variables = variables_.size();
     frame.bound = bound_.size();
     frame.typed = typed_.size();
+    frame.watched = watched_.size();
+    frame.constraints = constraints_.size();
     frame.state_hash = state_hash_;
     frame.variables_hash = variables_hash_;
   }
@@ -742,6 +881,11 @@ private:
       bound_.pop_back();
     }
     variables_hash_ = frame.variables_hash;
+    while (watched_.size() > frame.watched) {
+      variables_[watched_.back()].watch.pop_back();
+      watched_.pop_back();
+    }
+    constraints_.resize(frame.constraints);
     variables_.resize(frame.variables);
     cells_.resize(frame.cells);
     args_.resize(frame.args);
@@ -766,12 +910,31 @@ private:
       if (!fits(to, variable)) {
         return false;
       }
+      // The atoms that waited for this value, if it was the last one they waited for
+      variable.value = to;
+      for (uint32_t c : variable.watch) {
+        Atom atom = constraints_[c];
+        bool known = true;
+        for (size_t i = 1; i < atom.size(); ++i) {
+          atom[i] = value(atom[i]);
+          known = known && atom[i] < kVariable;
+        }
+        if (known && state_.count(atom) == 0) {
+          variable.value = kNone;
+          return false;
+        }
+      }
     } else {
       for (const sem::TypeSpec * t : variable.types) {
         narrow(to, t);
       }
+      const std::vector<uint32_t> waiting = variable.watch;
+      for (uint32_t c : waiting) {
+        variables_[to - kVariable].watch.push_back(c);
+        watched_.push_back(to - kVariable);
+      }
     }
-    variable.value = to;
+    variables_[reference - kVariable].value = to;
     bound_.push_back(reference - kVariable);
     variables_hash_ ^= mix((uint64_t{reference} << 32) | to);
     return true;
@@ -883,6 +1046,18 @@ private:
         }
       }
     }
+    // What was pulled up, where its values are known: the rest waits (see take())
+    for (size_t r = schema.own; r < schema.required.size(); ++r) {
+      Atom atom{schema.required[r].predicate};
+      bool known = true;
+      for (const Arg & x : schema.required[r].args) {
+        atom.push_back(x.variable && choice.binding[x.index] == kNone ? kNone : of(x));
+        known = known && atom.back() < kVariable;
+      }
+      if (known && state_.count(atom) == 0) {
+        return false;
+      }
+    }
     if (schema.condition != nullptr && schema.network != nullptr) {
       Env env;
       for (size_t p = 0; p < schema.condition->params.size(); ++p) {
@@ -943,6 +1118,26 @@ private:
         narrow(choice.binding[p], schema.types[p]);
       }
     }
+    // What was pulled up and has a variable waits for its value
+    for (size_t r = schema.own; r < schema.required.size(); ++r) {
+      Atom atom{schema.required[r].predicate};
+      for (const Arg & x : schema.required[r].args) {
+        atom.push_back(x.variable ? value(choice.binding[x.index]) : x.index);
+      }
+      const uint32_t c = static_cast<uint32_t>(constraints_.size());
+      bool waits = false;
+      for (size_t i = 1; i < atom.size(); ++i) {
+        const auto here = atom.begin() + static_cast<std::ptrdiff_t>(i);
+        if (atom[i] >= kVariable && std::find(atom.begin() + 1, here, atom[i]) == here) {
+          variables_[atom[i] - kVariable].watch.push_back(c);
+          watched_.push_back(atom[i] - kVariable);
+          waits = true;
+        }
+      }
+      if (waits) {
+        constraints_.push_back(std::move(atom));
+      }
+    }
     // Nodes in the order of the method, as the format of the plan asks; cells from the last
     const uint32_t first_node = static_cast<uint32_t>(nodes_.size());
     for (uint32_t s : schema.order) {
@@ -974,8 +1169,10 @@ private:
       cell.next = next;
       cell.node = first_node + k;
       uint64_t h = mix((next == kNone ? 0 : cells_[next].hash) + node.task + 1);
+      cell.open = next != kNone && cells_[next].open;
       for (size_t i = 0; i < net.steps[schema.order[k]].args.size(); ++i) {
         h = mix(h ^ args_[node.args + i]);
+        cell.open = cell.open || args_[node.args + i] >= kVariable;
       }
       cell.hash = h;
       next = static_cast<uint32_t>(cells_.size());
@@ -1079,6 +1276,8 @@ private:
   std::vector<std::pair<bool, Atom>> trail_;       // added (true) or removed, to undo
   std::vector<Variable> variables_;
   std::vector<uint32_t> bound_;                    // variables given a value, to undo
+  std::vector<Atom> constraints_;                  // pulled up, waiting for variables
+  std::vector<uint32_t> watched_;                  // variables given one more to watch, to undo
   std::vector<uint32_t> typed_;                    // variables given one more type, to undo
   uint64_t variables_hash_ = 0;                    // of the values given
   std::vector<Cell> cells_;

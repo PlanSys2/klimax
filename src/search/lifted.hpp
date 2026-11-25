@@ -34,8 +34,10 @@ namespace klimax::search
  * leaves free take the values with which the precondition holds in the current state, found by
  * matching the atoms it requires against the state. A task and state already seen, with the
  * same tasks pending after it, is not searched again. A task that comes from itself with the
- * same arguments and no action in between is a recursion that does not progress: it is cut, and
- * if no plan is found the search starts again allowing it once more, up to a few times.
+ * same arguments and in the same state is a recursion that does not progress: it is cut, and
+ * if no plan is found the search starts again allowing it once more, up to a few times. The
+ * atoms of predicates that no action changes, which the actions of a method will require, are
+ * checked when the method is chosen.
  *
  * For problems whose ground form is too large, and for domains written as a recipe, where the
  * first method that applies is the right one. Totally ordered problems only (Unsupported

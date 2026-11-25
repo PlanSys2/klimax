@@ -8,7 +8,7 @@ The method is that of the baseline.
 
 | Planner | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 344 | 473 | 616 |
+| **Klimax** | 350 | 489 | 612 |
 | PandaDealer agile-1 | 155 | 318 | 494 |
 | PandaDealer agile-lama | 162 | 308 | 494 |
 | PANDA lamda | 140 | 278 | 487 |
@@ -33,20 +33,20 @@ By domain at 30 s, against the best of the other configurations in each domain (
 | Blocksworld-HPDDL | 30 | **30** | 24 | PandaDealer agile-1 |
 | Depots | 30 | **29** | 26 | Linear-Complex, Linear-Simple |
 | Factories-simple | 20 | **9** | **9** | PANDA lamda, PandaDealer agile-lama |
-| Freecell-Learned-ECAI-16 | 60 | **14** | 7 | Linear-Complex |
+| Freecell-Learned-ECAI-16 | 60 | **11** | 7 | Linear-Complex |
 | Hiking | 30 | 22 | **25** | HyperTensioN |
 | Lamps | 30 | **17** | **17** | PandaDealer agile-1, PandaDealer agile-lama |
-| Logistics-Learned-ECAI-16 | 80 | 70 | **74** | PandaDealer agile-1 |
+| Logistics-Learned-ECAI-16 | 80 | 71 | **74** | PandaDealer agile-1 |
 | Minecraft-Player | 20 | **5** | **5** | HyperTensioN |
-| Minecraft-Regular | 59 | **53** | 49 | HyperTensioN |
+| Minecraft-Regular | 59 | **54** | 49 | HyperTensioN |
 | Monroe-Fully-Observable | 20 | **20** | **20** | HyperTensioN, Lilotane |
-| Monroe-Partially-Observable | 20 | 18 | **19** | Lilotane |
+| Monroe-Partially-Observable | 20 | 16 | **19** | Lilotane |
 | Multiarm-Blocksworld | 74 | **74** | **74** | PandaDealer agile-1, PandaDealer agile-lama |
 | Robot | 20 | **20** | **20** | Linear-Complex, Linear-Simple, PANDA lamda, PANDA ppro,... |
 | Rover-GTOHP | 30 | **30** | 27 | HyperTensioN |
 | Satellite-GTOHP | 20 | **20** | 16 | HyperTensioN |
 | SharpSAT | 21 | **17** | 11 | HyperTensioN |
-| Snake | 27 | **7** | 3 | Linear-Complex, PandaDealer agile-1, PandaDealer agile-... |
+| Snake | 27 | **6** | 3 | Linear-Complex, PandaDealer agile-1, PandaDealer agile-... |
 | Towers | 20 | **18** | 11 | Linear-Complex, PANDA lamda, PANDA ppro, PandaDealer ag... |
 | Transport | 40 | **40** | 33 | Lilotane, PANDA lamda |
 | Woodworking | 30 | **30** | **30** | Lilotane, PDDL4J LiftedTreePath |
@@ -94,19 +94,21 @@ as the tables above:
 
 | Partial order (283) | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 77 | 93 | 108 |
+| **Klimax** | 78 | 106 | 142 |
 | PANDA optimal (`rc2(lmc)`) | 73 | 95 | 119 |
 
 Where Klimax and another planner both prove a plan the shortest, the lengths agree: in 210 of
-210 total-order problems and in 101 of 101 partial-order ones.
+210 total-order problems and in 114 of 114 partial-order ones.
 
 In total order Klimax proves at least as many as the others in every domain; the widest gaps
 are Minecraft-Regular (52 against 23), Hiking (16 against 1), Satellite (20 against 5),
 Transport (16 against 6) and Monroe-Fully-Observable (20 against 11). In partial order the
-proof needs the search that interleaves subtasks, which keeps every node in memory: it stops at
-its limit in Colouring, Rover and Transport. Klimax proves more in Ultralight-Cockpit (29
-against 25) and Transport (6 against 3), PANDA in Monroe (12 against none), Satellite (23
-against 20) and Woodworking (10 against 7).
+proof needs the search that interleaves subtasks. It runs first without the relaxation, cut
+by the bound on the length alone: where the space under the bound is small, the relaxation
+costs more at each node than it saves (Monroe: 35 proved, none with it). Klimax proves more
+in Monroe (35 against 12), Ultralight-Cockpit (29 against 25) and Transport (4 against 3),
+PANDA in Satellite (23 against 21) and Woodworking (10 against 7). The search keeps every node
+in memory and stops at its limit in Colouring, Rover and Transport.
 
 ## Notes
 
@@ -120,8 +122,8 @@ against 20) and Woodworking (10 against 7).
     and domains written as a recipe (Blocksworld-HPDDL, Hiking).
   - The third one solves the domains whose methods leave many parameters free and where only
     the goal tells which values were right (Woodworking: 30 against 16 without it; Monroe,
-    partially observable: 18 against 8).
-  - The share costs the first one problems that it solved near the limit (6 of Logistics).
+    partially observable: 16 against 8).
+  - The share costs the first one problems that it solved near the limit (Logistics, Freecell).
 - Klimax answers "unsolvable" on 8 total-order problems of Minecraft-Player: the grounding proves
   that the initial tasks cannot be decomposed into reachable actions. No planner of the baseline
   solves them. They count as not solved in the tables.

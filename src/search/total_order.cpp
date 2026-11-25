@@ -405,17 +405,27 @@ public:
     }
     limit_ = ~uint64_t{0};
     while (result.steps > 0) {
-      po_nodes_.clear();
-      po_items_.clear();
-      po_edges_.clear();
-      po_open_.clear();
-      po_seen_.clear();
-      po_fewest_.clear();
-      po_ids_ = 0;
-      po_over_ = false;
-      po_bound_ = result.steps - 1;
+      // First without the relaxation, which costs more than it saves when the space under the
+      // bound is small; with it if that runs out of its memory
       Result shorter;
-      const Outcome outcome = partial_order(shorter);
+      Outcome outcome = Outcome::OutOfBudget;
+      for (bool plain : {true, false}) {
+        po_nodes_.clear();
+        po_items_.clear();
+        po_edges_.clear();
+        po_open_.clear();
+        po_seen_.clear();
+        po_fewest_.clear();
+        po_ids_ = 0;
+        po_over_ = false;
+        po_bound_ = result.steps - 1;
+        po_plain_ = plain;
+        shorter = Result();
+        outcome = partial_order(shorter);
+        if (outcome != Outcome::OutOfBudget || !po_over_) {
+          break;
+        }
+      }
       result.expansions = expansions_;
       if (outcome != Outcome::Solved) {
         result.optimal = outcome == Outcome::Unsolvable;
@@ -2024,17 +2034,23 @@ private:
           continue;  // no plan this short through here
         }
       }
-      relaxed_->evaluate(state_);
-      work_ += relaxed_->operators() / 32 + 1;
-      uint64_t base = goal_cost();
-      bool possible = base != kInfinite;
-      for (uint32_t i = 0; i < node.item_count && possible; ++i) {
-        const uint32_t c = relaxed_->task(po_items_[node.items + i].task);
-        possible = c != Relaxed::kUnreached;
-        base += c;
-      }
-      if (!possible) {
-        continue;
+      // Under a bound the search may go without the relaxation: the nodes are ordered by the
+      // actions done and cut by the bound alone, at a small part of the cost of each one
+      const bool plain = po_bound_ != kInfinite && po_plain_;
+      uint64_t base = 0;
+      if (!plain) {
+        relaxed_->evaluate(state_);
+        work_ += relaxed_->operators() / 32 + 1;
+        base = goal_cost();
+        bool possible = base != kInfinite;
+        for (uint32_t i = 0; i < node.item_count && possible; ++i) {
+          const uint32_t c = relaxed_->task(po_items_[node.items + i].task);
+          possible = c != Relaxed::kUnreached;
+          base += c;
+        }
+        if (!possible) {
+          continue;
+        }
       }
       // The items with nothing before them
       std::vector<bool> waits(node.item_count, false);
@@ -2047,7 +2063,7 @@ private:
         }
         const PoItem item = po_items_[node.items + i];
         const tdg::Task & task = p_.tasks[item.task];
-        const uint64_t without = base - relaxed_->task(item.task);
+        const uint64_t without = plain ? node.actions : base - relaxed_->task(item.task);
         if (!task.actions.empty()) {
           const ground::Action * action = nullptr;
           for (uint32_t a : task.actions) {
@@ -2092,7 +2108,7 @@ private:
           {
             continue;
           }
-          const uint32_t cost = relaxed_->method(m);
+          const uint32_t cost = plain ? 0 : relaxed_->method(m);
           if (cost == Relaxed::kUnreached) {
             continue;
           }
@@ -2595,6 +2611,7 @@ private:
   std::vector<uint64_t> po_hashes_;
   std::vector<std::pair<uint64_t, uint32_t>> po_open_;
   std::unordered_set<uint64_t> po_seen_;
+  bool po_plain_ = false;                             // under a bound: without the heuristic
   std::unordered_map<uint64_t, uint32_t> po_fewest_;  // under a bound: fewest actions done
   uint64_t po_bound_ = kInfinite;                     // on the length of the plan
   uint32_t po_ids_ = 0;

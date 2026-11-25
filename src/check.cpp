@@ -52,7 +52,7 @@ constexpr double kLiftedPiece = 0.005;
 // and after them. Measured on the total-order benchmark of IPC 2023
 constexpr double kEarly = 1.0;
 constexpr double kLiftedShare[2] = {0.25, 0.2};
-constexpr double kSatShare[2] = {0.25, 0.5};
+constexpr double kSatShare[2] = {0.0, 0.5};
 
 // The seconds that a search with those parts is due when `elapsed` have passed
 double due(const double share[2], double elapsed)

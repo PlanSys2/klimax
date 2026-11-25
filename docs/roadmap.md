@@ -43,7 +43,8 @@ in [baseline.md](baseline.md).
   smaller.
 - Domains where a planner of the baseline solves more: Blocksworld-GTOHP, Hiking, Logistics.
 - An optimal search with an admissible heuristic. With partial order, a proof that does not
-  keep every node in memory: it is what stops Klimax in Colouring, Rover and Transport.
+  keep every node in memory: it is what stops Klimax in Colouring, Rover and Transport, though
+  it proves more plans the shortest than the planners of the baseline in both tracks.
 
 ## Known limits
 

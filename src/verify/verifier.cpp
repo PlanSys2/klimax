@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "validate/world.hpp"
 #include "verify/interpreter.hpp"
 
 namespace klimax::verifier
@@ -32,6 +33,8 @@ namespace klimax::verifier
 
 namespace
 {
+
+namespace val = kairos::val;
 
 // --- The plan as written ----------------------------------------------------------------------
 
@@ -168,8 +171,9 @@ class Verifier
 public:
   Verifier(const Model & model, std::string_view text)
   : m_(model), plan_(read_plan(text)),
-    domain_(model, model.pddl.nodes, model.pddl.symbols),
-    problem_(model, model.problem.nodes, model.problem.symbols) {}
+    world_(model.pddl, model.domain, model.problem, model.objects, exact())
+  {
+  }
 
   void run()
   {
@@ -652,11 +656,11 @@ private:
     }
     const ast::Action & a = m_.pddl.actions[static_cast<size_t>(method.precondition_action)];
     for (const std::vector<uint32_t> & binding : n.bindings) {
-      Env env;
+      val::Bindings env;
       for (size_t p = 0; p < a.params.size(); ++p) {
         env.emplace_back(a.params[p].name, binding[method.precondition_params[p]]);
       }
-      if (domain_.holds(a.precondition, state_, env)) {
+      if (holds(world_.domain_eval, a.precondition, env)) {
         n.held = static_cast<size_t>(&binding - n.bindings.data());
         return true;
       }
@@ -664,61 +668,56 @@ private:
     return false;
   }
 
-  // An atom that a precondition requires, over the parameters of its method
-  struct Required
-  {
-    uint32_t predicate;
-    std::vector<Arg> args;
-  };
-
   // Values for the free parameters of a method with which its precondition holds now: those
-  // that the atoms it requires leave in the state first, and by type the rest
+  // that the precondition mentions as Kairos' evaluator joins them with the state (the atoms
+  // true in it, the objects it compares with), and by type the rest
   bool choose(Node & n, const hddl::MethodInfo & method)
   {
-    std::vector<Required> required;
-    const ast::Action * a = nullptr;
-    if (method.precondition_action >= 0) {
-      a = &m_.pddl.actions[static_cast<size_t>(method.precondition_action)];
-      std::vector<ast::FormulaId> atoms;
-      domain_.required(a->precondition, atoms);
-      for (ast::FormulaId id : atoms) {
-        const ast::Formula & f = domain_.formula(id);
-        Required r{domain_.predicate(f.name), {}};
-        bool usable = true;
-        for (ast::TermId t : f.args) {
-          const ast::Term & term = domain_.term(t);
-          if (term.kind == ast::TermKind::Name) {
-            r.args.push_back(Arg{false, domain_.object(term.name)});
-            continue;
-          }
-          size_t p = 0;
-          while (p < a->params.size() && a->params[p].name != term.name) {
-            ++p;
-          }
-          if (term.kind != ast::TermKind::Variable || p == a->params.size()) {
-            usable = false;
-            break;
-          }
-          r.args.push_back(Arg{true, method.precondition_params[p]});
-        }
-        if (usable) {
-          required.push_back(std::move(r));
-        }
-      }
-    }
-    std::unordered_map<uint32_t, std::vector<const Atom *>> facts;
-    for (const Required & r : required) {
-      facts[r.predicate];
-    }
-    for (const Atom & atom : state_) {
-      auto found = facts.find(atom[0]);
-      if (found != facts.end()) {
-        found->second.push_back(&atom);
-      }
-    }
+    const ast::Action * a = method.precondition_action < 0 ? nullptr :
+      &m_.pddl.actions[static_cast<size_t>(method.precondition_action)];
     size_t work = 0;
     std::vector<uint32_t> binding = n.partial;
-    if (!choose(method, a, required, facts, binding, work)) {
+    bool found = false;
+    if (a == nullptr || !a->precondition.valid()) {
+      found = by_type(method, binding, work);
+    } else {
+      val::Bindings env;
+      val::Vars vars;
+      std::vector<uint32_t> free;  // the method parameter of each of `vars`
+      for (size_t p = 0; p < a->params.size(); ++p) {
+        const uint32_t param = method.precondition_params[p];
+        if (binding[param] != kNone) {
+          env.emplace_back(a->params[p].name, binding[param]);
+        } else {
+          vars.emplace_back(a->params[p].name, method.params[param].types);
+          free.push_back(param);
+        }
+      }
+      const size_t fixed = env.size();
+      try {
+        world_.domain_eval.for_each_joined_binding(
+          vars, a->precondition, val::Evaluator::Ctx{state_}, env, [&]() {
+            if (++work > kChoices) {
+              invalid("too many values for the free parameters of method " + method.name);
+            }
+            std::vector<uint32_t> next = binding;
+            for (size_t v = 0; v < vars.size(); ++v) {
+              next[free[v]] = env[fixed + v].second;
+            }
+            val::Bindings all = env;
+            if (holds(world_.domain_eval, a->precondition, all) && by_type(method, next, work)) {
+              binding = std::move(next);
+              found = true;
+            }
+            return !found;
+          });
+      } catch (const val::EvalError &) {
+        found = false;
+      } catch (const val::Unsupported & u) {
+        invalid("unsupported: " + u.message);
+      }
+    }
+    if (!found) {
       return false;
     }
     n.bindings.assign(1, std::move(binding));
@@ -727,48 +726,10 @@ private:
     return true;
   }
 
-  bool choose(
-    const hddl::MethodInfo & method, const ast::Action * a,
-    const std::vector<Required> & required,
-    const std::unordered_map<uint32_t, std::vector<const Atom *>> & facts,
-    std::vector<uint32_t> & binding, size_t & work)
+  // The parameters still free (the precondition does not mention them): any objects of their
+  // types that the constraints of the method allow
+  bool by_type(const hddl::MethodInfo & method, std::vector<uint32_t> & binding, size_t & work)
   {
-    auto count = [&]() {
-        if (++work > kChoices) {
-          invalid("too many values for the free parameters of method " + method.name);
-        }
-      };
-    for (const Required & r : required) {
-      if (std::none_of(r.args.begin(), r.args.end(),
-        [&](const Arg & x) {return x.variable && binding[x.index] == kNone;}))
-      {
-        continue;
-      }
-      for (const Atom * atom : facts.at(r.predicate)) {
-        count();
-        std::vector<uint32_t> next = binding;
-        bool fits = atom->size() == r.args.size() + 1;
-        for (size_t i = 0; fits && i < r.args.size(); ++i) {
-          const uint32_t value = (*atom)[i + 1];
-          const Arg & x = r.args[i];
-          if (!x.variable) {
-            fits = x.index == value;
-          } else if (next[x.index] != kNone) {
-            fits = next[x.index] == value;
-          } else {
-            const auto & types = method.params[x.index].types;
-            fits = types.empty() || m_.domain.types.fits(object(value).types, types);
-            next[x.index] = value;
-          }
-        }
-        if (fits && choose(method, a, required, facts, next, work)) {
-          binding = std::move(next);
-          return true;
-        }
-      }
-      return false;  // nothing in the state for an atom that is required
-    }
-    // No required atom has a free parameter left: by type
     for (uint32_t p = 0; p < method.params.size(); ++p) {
       if (binding[p] != kNone) {
         continue;
@@ -778,28 +739,90 @@ private:
         if (!types.empty() && !m_.domain.types.fits(object(o).types, types)) {
           continue;
         }
-        count();
+        if (++work > kChoices) {
+          invalid("too many values for the free parameters of method " + method.name);
+        }
         std::vector<uint32_t> next = binding;
         next[p] = o;
-        if (choose(method, a, required, facts, next, work)) {
+        if (by_type(method, next, work)) {
           binding = std::move(next);
           return true;
         }
       }
       return false;
     }
-    count();
-    if (!consistent(method.network, binding)) {
+    return consistent(method.network, binding);
+  }
+
+  // Kairos' validator evaluates the syntax tree on a state. A condition that reads a fluent
+  // with no value does not hold
+  bool holds(val::Evaluator & evaluator, ast::FormulaId formula, val::Bindings & env)
+  {
+    try {
+      return evaluator.holds(formula, val::Evaluator::Ctx{state_}, env);
+    } catch (const val::EvalError &) {
       return false;
+    } catch (const val::Unsupported & u) {
+      invalid("unsupported: " + u.message);
     }
-    if (a == nullptr) {
-      return true;
+  }
+
+  // Comparisons as written: the searches compare so
+  static const kairos::ValidateOptions & exact()
+  {
+    static const kairos::ValidateOptions options = [] {
+        kairos::ValidateOptions o;
+        o.tolerance = 0.0;
+        return o;
+      }();
+    return options;
+  }
+
+  // The effects of a step, all read in the state before it
+  void apply(const ast::Action & a, val::Bindings & env, const Node & n)
+  {
+    val::Changes changes;
+    try {
+      world_.domain_eval.effects(a.effect, val::Evaluator::Ctx{state_}, env, true, changes);
+    } catch (const val::EvalError &) {
+      invalid("step " + show(n) + " is not applicable: it reads a number with no value");
+    } catch (const val::Unsupported & u) {
+      invalid("unsupported: " + u.message);
     }
-    Env env;
-    for (size_t p = 0; p < a->params.size(); ++p) {
-      env.emplace_back(a->params[p].name, binding[method.precondition_params[p]]);
+    std::vector<double> numbers;
+    for (const val::Changes::Num & c : changes.nums) {
+      const auto old = state_.numbers.find(c.key);
+      double value = c.value;
+      if (c.op != ast::AssignOp::Assign) {
+        if (old == state_.numbers.end() || (c.op == ast::AssignOp::ScaleDown && c.value == 0.0)) {
+          invalid("step " + show(n) + " is not applicable: it reads a number with no value");
+        }
+        switch (c.op) {
+          case ast::AssignOp::Increase: value = old->second + c.value; break;
+          case ast::AssignOp::Decrease: value = old->second - c.value; break;
+          case ast::AssignOp::ScaleUp: value = old->second * c.value; break;
+          default: value = old->second / c.value; break;
+        }
+      }
+      numbers.push_back(value);
     }
-    return domain_.holds(a->precondition, state_, env);
+    for (const val::Key & k : changes.dels) {
+      state_.atoms.erase(k);
+    }
+    for (const val::Key & k : changes.adds) {
+      state_.atoms.insert(k);
+    }
+    for (size_t i = 0; i < numbers.size(); ++i) {
+      state_.numbers[changes.nums[i].key] = numbers[i];
+    }
+    for (const val::Changes::Obj & c : changes.objs) {
+      if (c.value) {
+        state_.objects[c.key] = *c.value;
+      } else {
+        state_.objects.erase(c.key);
+      }
+    }
+    state_.changed();
   }
 
   // Places `e` and whatever becomes placeable; tests wait until their precondition holds
@@ -848,34 +871,17 @@ private:
     for (uint32_t n : sequence_) {
       is_leaf_[nodes_[n].start] = true;
     }
-    Env env;
+    val::Bindings env;
     for (const ast::InitItem & item : m_.problem.init) {
       if (item.time || item.negated) {
         invalid("unsupported: timed initial literals");
       }
-      if (item.kind != ast::InitItem::Kind::Fact) {
-        Atom fluent{problem_.function(item.name)};
-        for (ast::TermId t : item.args) {
-          fluent.push_back(problem_.object(t, env));
-        }
-        const std::optional<double> value = problem_.number(item.value, env);
-        if (!value) {
-          invalid("unsupported: this initial value");
-        }
-        values_[std::move(fluent)] = *value;
-        continue;
-      }
-      state_.insert(problem_.atom(item.name, item.args, env));
     }
-    // Action costs: (total-cost) starts at 0 when the problem does not say
-    if (auto cost = m_.domain.functions.find("total-cost");
-      cost && m_.domain.functions.items[*cost].numeric)
-    {
-      values_.try_emplace(Atom{cost->value()}, 0.0);
+    try {
+      world_.initial_state(state_);
+    } catch (const val::EvalError & e) {
+      invalid("unsupported: this initial state: " + e.message);
     }
-    domain_.numbers(&values_);
-    problem_.numbers(&values_);
-    domain_.costs(true);
     for (uint32_t e = 0; e < events_.size(); ++e) {
       if (events_[e].pending == 0 && !events_[e].placed && !is_leaf_[e] &&
         events_[e].node == kNone)
@@ -894,26 +900,11 @@ private:
       for (size_t p = 0; p < a.params.size(); ++p) {
         env.emplace_back(a.params[p].name, n.args[p]);
       }
-      if (a.precondition.valid() && !domain_.holds(a.precondition, state_, env)) {
+      if (a.precondition.valid() && !holds(world_.domain_eval, a.precondition, env)) {
         invalid("step " + show(n) + " is not applicable: its precondition does not hold");
       }
       if (a.effect.valid()) {
-        std::vector<Atom> adds;
-        std::vector<Atom> deletes;
-        std::vector<Change> changes;
-        domain_.effect(a.effect, state_, env, adds, deletes, &changes);
-        for (const Atom & d : deletes) {
-          state_.erase(d);
-        }
-        for (Atom & add : adds) {
-          state_.insert(std::move(add));
-        }
-        for (Change & change : changes) {
-          if (change.value != change.value) {
-            invalid("step " + show(n) + " is not applicable: it reads a number with no value");
-          }
-          values_[std::move(change.fluent)] = change.value;
-        }
+        apply(a, env, n);
       }
       place(n.start);
       settle();
@@ -928,14 +919,21 @@ private:
     }
     if (m_.problem.goal.valid()) {
       env.clear();
-      if (!problem_.holds(m_.problem.goal, state_, env)) {
+      if (!holds(world_.problem_eval, m_.problem.goal, env)) {
         invalid("the goal does not hold at the end of the plan");
       }
     }
     // The metric, in the state the plan ends in. Time is not read yet: no value then
     if (m_.problem.metric && !uses_time(m_.problem.metric->expr)) {
       env.clear();
-      metric_ = problem_.number(m_.problem.metric->expr, env);
+      try {
+        metric_ = world_.problem_eval.number(
+          m_.problem.metric->expr, val::Evaluator::Ctx{state_}, env);
+      } catch (const val::EvalError &) {
+        metric_.reset();
+      } catch (const val::Unsupported &) {
+        metric_.reset();
+      }
     }
   }
 
@@ -975,8 +973,7 @@ private:
   static constexpr size_t kListed = 10000;      // bindings of a method listed beforehand
   static constexpr size_t kChoices = 50000000;  // steps choosing them from the state instead
 
-  Interpreter domain_;
-  Interpreter problem_;
+  val::World world_;
   std::unordered_map<std::string, size_t> task_index_;
   std::unordered_map<std::string, size_t> method_index_;
   std::unordered_map<std::string, uint32_t> node_index_;
@@ -988,8 +985,7 @@ private:
   std::vector<bool> is_leaf_;
   std::vector<uint32_t> waiting_;   // tests whose predecessors are placed
   size_t placed_ = 0;
-  State state_;
-  Values values_;  // of the numeric fluents
+  val::State state_;
   std::optional<double> metric_;
 };
 

@@ -70,8 +70,10 @@ struct Tree
  * at a point allowed by the orderings; variable constraints hold; and the goal, if any, holds at
  * the end.
  *
- * Independent of the planner: it interprets the syntax tree directly. Sequential plans without
- * numbers (level L1); anything else is reported as unsupported, never accepted.
+ * Independent of the searches: the states and what holds in them come from the evaluator of
+ * Kairos' validator, which interprets the syntax tree and knows nothing of the ground problem
+ * the searches work on. Sequential plans, with numeric and object fluents; anything else is
+ * reported as unsupported, never accepted.
  *
  * With `tree`, a valid plan is also given as its decomposition: which subtask of its method each
  * step is, and the values of the method's parameters (those with which its precondition held).

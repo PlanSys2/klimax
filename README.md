@@ -42,7 +42,8 @@ the method in [docs/results.md](docs/results.md) and [docs/baseline.md](docs/bas
 ## What it does
 
 - **Plans** totally and partially ordered problems, with method preconditions, constraints
-  between variables and the conditions and effects of ADL.
+  between variables, the conditions and effects of ADL, numeric fluents, action costs and
+  fluents whose value is an object.
 - **Proves** when a problem has no plan, instead of running out of time.
 - **Anytime**: after the first plan it goes on to better ones and, when none is left, says that
   the plan is the best: the cheapest by the metric of the problem when it adds up action costs,

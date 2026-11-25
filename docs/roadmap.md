@@ -38,6 +38,9 @@ in [baseline.md](baseline.md).
   constants or static functions, or any sum of fluents that nothing reads), the anytime search
   bounds the cost instead of the length and proves the cheapest plan, with total and with
   partial order. A fluent that nothing reads is no longer part of the state.
+- **Object fluents** (H5): fluents whose value is an object, in conditions, effects and the
+  goal. Kairos grounds them and Klimax turns them into atoms, so that the searches and their
+  heuristics see them; the verifier follows them with the evaluator of Kairos' validator.
 - **Anytime and optimal** (H4): after the first plan Klimax looks for better ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans
@@ -61,8 +64,9 @@ in [baseline.md](baseline.md).
 ## Known limits
 
 - Durative actions and temporal constraints are read by neither the planner nor the verifier
-  yet: they are reported as not supported, never accepted. Of numbers, object fluents are not
-  read either.
+  yet: they are reported as not supported, never accepted.
+- Of object fluents: two that must differ, or that must be equal in the goal, are not planned
+  with (reported as not supported), and a function term cannot be the argument of a task.
 - The first plan is found without looking at the metric: only the anytime search uses it. With
   actions that cost nothing the cheapest plan is looked for among plans up to about twice as
   long as the first, and is not proved the cheapest. A metric that is not a sum of action

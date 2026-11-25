@@ -30,6 +30,7 @@
 #include "ground/datalog.hpp"
 #include "ground/grounder.hpp"
 #include "hddl/split.hpp"
+#include "tdg/object_fluents.hpp"
 #include "normalize/normalizer.hpp"
 
 namespace klimax::tdg
@@ -151,6 +152,9 @@ public:
         return kairos::Result<Problem>::failure(grounded.diagnostics());
       }
       p_.pddl = std::move(grounded).value();
+      // Object fluents as atoms, for searches and heuristics that know nothing else. Where
+      // that cannot be done they stay, and the searches refuse the problem
+      object_fluents_as_atoms(p_.pddl, m_);
       p_.stats.kairos_actions = p_.pddl.actions.size();
       p_.stats.kairos_ms = since() - p_.stats.datalog_ms;
       if (trace_) {

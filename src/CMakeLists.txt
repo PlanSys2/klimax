@@ -28,6 +28,7 @@ add_library(klimax_objects OBJECT
   search/sat.cpp
   search/total_order.cpp
   tdg/grounder.cpp
+  tdg/object_fluents.cpp
   verify/verifier.cpp
   version.cpp)
 set_target_properties(klimax_objects PROPERTIES

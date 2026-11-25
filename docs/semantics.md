@@ -76,6 +76,12 @@ state or an effect gives it one: a comparison that reads it does not hold, and a
 an effect that reads it (or that divides by zero) is not applicable. All the effects of an
 action read the state before it.
 
+A fluent whose value is an object (`:object-fluents`) may have no value (`undefined`): an
+atom or a comparison that reads it then does not hold. **[decision]** A function term is not
+allowed as an argument of a task (in a method or in the initial task network): HDDL 2.1 does not
+say when it would be evaluated. A parameter of the method bound by its precondition, as
+`(= (in ?b) ?from)`, says it.
+
 The metric of the problem (`(:metric minimize e)` or `maximize`) is the value of `e` in the
 state the plan ends in; it does not change which plans are valid. **[decision]** As in the
 action costs of PDDL, `(total-cost)` starts at 0 when the initial state does not say.

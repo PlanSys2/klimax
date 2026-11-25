@@ -33,12 +33,14 @@ namespace klimax::search
  * its methods. The methods are tried in the order of the domain; the parameters that the task
  * leaves free take the values with which the precondition holds in the current state, found by
  * matching the atoms it requires against the state. A task and state already seen, with the
- * same tasks pending after it, is not searched again.
+ * same tasks pending after it, is not searched again. A task that comes from itself with the
+ * same arguments and no action in between is a recursion that does not progress: it is cut, and
+ * if no plan is found the search starts again allowing it once more, up to a few times.
  *
  * For problems whose ground form is too large, and for domains written as a recipe, where the
  * first method that applies is the right one. Totally ordered problems only (Unsupported
- * otherwise, with a message). Unsolvable when the whole space was searched. It bounds its own
- * memory: OutOfBudget with a message when it reaches the bound, and it does not go on then.
+ * otherwise, with a message). Unsolvable when the whole space was searched. OutOfBudget with a
+ * message when it gives up, for its memory or for the recursion it cut: it does not go on then.
  */
 class LiftedSearch
 {

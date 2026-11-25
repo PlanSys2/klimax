@@ -106,6 +106,7 @@ struct Node
   uint32_t args;
   uint32_t parent;
   uint32_t method = kNone;
+  uint32_t at = kNone;   // actions done when it was decomposed
 };
 
 // A way of decomposing a task or of doing an action: values for the parameters (kNone: left
@@ -119,6 +120,18 @@ struct Choice
 };
 
 enum class Kind : uint8_t {Root, Method, Action};
+
+// Where the enumeration of the ways of a choice point is: the values given so far and what
+// gives the next one (the atoms of a predicate, the objects, or nothing more: a leaf)
+struct Level
+{
+  Choice choice;
+  enum class By : uint8_t {Fact, Object, Leaf} by = By::Leaf;
+  uint32_t index = 0;    // of the required atom or of the parameter
+  Atom last;             // Fact: the last atom tried, if `any`
+  bool any = false;
+  uint32_t object = 0;   // Object: the next one to try
+};
 
 // A choice point: what to go back to, and the ways not tried yet
 struct Frame
@@ -135,8 +148,10 @@ struct Frame
   size_t typed;
   uint64_t state_hash;
   uint64_t variables_hash;
-  std::vector<Choice> choices;
-  size_t next = 0;
+  Choice start;               // Root, Action: what is known of the parameters
+  bool started = false;
+  size_t method = 0;          // Method: the next one of the task to try
+  std::vector<Level> levels;
 };
 
 }  // namespace
@@ -188,7 +203,7 @@ private:
         finished_ = false;
         return;
       }
-      if (cells_.size() > kCells || stored_ > kStored) {
+      if (cells_.size() > kCells) {
         result.outcome = Outcome::OutOfBudget;
         result.message = "the search that does not ground ran out of its memory";
         return;
@@ -197,28 +212,43 @@ private:
         Frame first;
         first.kind = Kind::Root;
         mark(first);
-        Choice start;
-        start.binding.assign(m_.initial_params.size(), kNone);
-        choices(initial_, std::move(start), first.choices);
-        if (!out_) {
-          rooted_ = true;
-          push(std::move(first));
-        }
+        first.start.binding.assign(m_.initial_params.size(), kNone);
+        rooted_ = true;
+        frames_.push_back(std::move(first));
         continue;
       }
       if (!forward) {
         while (!frames_.empty()) {
           Frame & frame = frames_.back();
           restore(frame);
-          if (frame.next < frame.choices.size()) {
-            if (take(frame, current)) {
+          Choice choice;
+          if (produce(frame, choice)) {
+            if (take(frame, std::move(choice), current)) {
               forward = true;
               break;
             }
             continue;  // that way does not fit: the next one
           }
-          stored_ -= frame.choices.size();
+          if (out_) {
+            break;  // the budget ran out while choosing: from this choice point the next time
+          }
           frames_.pop_back();
+        }
+        if (out_) {
+          continue;
+        }
+        if (!forward && cut_ && repeats_ >= kRepeats) {
+          complete_ = false;
+          cut_ = false;
+        }
+        if (!forward && cut_) {
+          // Something was left out for coming back to the same task: once more is allowed now
+          ++repeats_;
+          cut_ = false;
+          rooted_ = false;
+          seen_.clear();
+          current = kNone;
+          continue;
         }
         if (!forward) {
           result.outcome = complete_ ? Outcome::Unsolvable : Outcome::OutOfBudget;
@@ -248,7 +278,6 @@ private:
       ++expansions_;
       const hddl::TaskInfo & task = m_.tasks[TaskId(cell.task)];
       if (task.primitive) {
-        const Schema & schema = actions_[cell.task];
         Choice choice;
         choice.binding.resize(task.params.size());
         bool pending = false;
@@ -269,50 +298,173 @@ private:
         frame.kind = Kind::Action;
         frame.cell = current;
         mark(frame);
-        choices(schema, std::move(choice), frame.choices);
-        if (out_) {
-          --expansions_;
-          forward = true;  // this task again, the next time
-        } else {
-          push(std::move(frame));
-        }
+        frame.start = std::move(choice);
+        frames_.push_back(std::move(frame));
+        continue;
+      }
+      if (again(cell)) {
+        cut_ = true;
         continue;
       }
       const uint64_t key = mix(state_hash_ ^ cell.hash ^ variables_hash_);
       if (!fresh(key)) {
         continue;
       }
+      nodes_[cell.node].at = static_cast<uint32_t>(sequence_.size());
       Frame frame;
       frame.cell = current;
       mark(frame);
-      for (uint32_t m : m_.methods_of[cell.task]) {
-        const hddl::MethodInfo & method = m_.methods[m];
-        Choice choice;
-        choice.method = m;
-        choice.binding.assign(method.params.size(), kNone);
-        if (unify(method, methods_[m], cell, choice)) {
-          choices(methods_[m], std::move(choice), frame.choices);
-        }
-      }
-      if (out_) {
-        seen_.erase(key);
-        --expansions_;
-        forward = true;
-      } else {
-        push(std::move(frame));
-      }
+      frames_.push_back(std::move(frame));
     }
   }
 
-  static constexpr size_t kChoices = 100000;   // ways of decomposing one task
   static constexpr size_t kSeen = 5000000;     // tasks and states remembered
   static constexpr size_t kCells = 5000000;    // pending tasks made along one branch
-  static constexpr size_t kStored = 2000000;   // ways not tried yet, in all the choice points
+  static constexpr uint32_t kRepeats = 3;      // of a task from itself with nothing done
 
-  void push(Frame && frame)
+  // The task comes from itself, with the same arguments and no action in between, more than
+  // `repeats_` times: a recursion that does not progress
+  bool again(const Cell & cell) const
   {
-    stored_ += frame.choices.size();
-    frames_.push_back(std::move(frame));
+    const hddl::TaskInfo & task = m_.tasks[TaskId(cell.task)];
+    uint32_t times = 0;
+    for (uint32_t n = nodes_[cell.node].parent; n != kNone; n = nodes_[n].parent) {
+      const Node & node = nodes_[n];
+      if (node.at != sequence_.size()) {
+        break;
+      }
+      if (node.task != cell.task) {
+        continue;
+      }
+      bool same = true;
+      for (size_t i = 0; same && i < task.params.size(); ++i) {
+        same = value(args_[node.args + i]) == value(args_[cell.args + i]);
+      }
+      if (same && ++times > repeats_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const Schema & schema_of(const Frame & frame, const Choice & choice) const
+  {
+    return frame.kind == Kind::Root ? initial_ :
+           frame.kind == Kind::Action ? actions_[cells_[frame.cell].task] : methods_[choice.method];
+  }
+
+  // What gives the next value to `choice`: an atom that the precondition requires with a
+  // parameter still open, then a parameter that needs a value now
+  Level level(const Schema & schema, Choice choice) const
+  {
+    Level l;
+    for (uint32_t r = 0; r < schema.required.size() && l.by == Level::By::Leaf; ++r) {
+      const std::vector<Arg> & args = schema.required[r].args;
+      if (std::any_of(args.begin(), args.end(),
+        [&](const Arg & x) {return x.variable && open(choice, x.index);}))
+      {
+        l.by = Level::By::Fact;
+        l.index = r;
+      }
+    }
+    for (uint32_t p = 0; p < schema.types.size() && l.by == Level::By::Leaf; ++p) {
+      if (schema.needed[p] && open(choice, p)) {
+        l.by = Level::By::Object;
+        l.index = p;
+      }
+    }
+    l.choice = std::move(choice);
+    return l;
+  }
+
+  // The first level of the next thing to enumerate in the choice point; false: nothing more
+  bool seed(Frame & frame)
+  {
+    if (frame.kind != Kind::Method) {
+      if (frame.started) {
+        return false;
+      }
+      frame.started = true;
+      frame.levels.push_back(level(schema_of(frame, frame.start), frame.start));
+      return true;
+    }
+    const Cell & cell = cells_[frame.cell];
+    const std::vector<uint32_t> & methods = m_.methods_of[cell.task];
+    while (frame.method < methods.size()) {
+      const uint32_t m = methods[frame.method++];
+      Choice choice;
+      choice.method = m;
+      choice.binding.assign(m_.methods[m].params.size(), kNone);
+      if (unify(m_.methods[m], methods_[m], cell, choice)) {
+        frame.levels.push_back(level(methods_[m], std::move(choice)));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // The next way of the choice point, in `out`: values from the atoms that the precondition
+  // requires, by type for the other parameters that need one now; the constraints, the types
+  // of the subtasks' arguments and the precondition hold. False: no more, or out of budget
+  // (`out_`: it goes on from the same place the next time). The state is that of the frame
+  bool produce(Frame & frame, Choice & out)
+  {
+    while (true) {
+      if ((++work_ & 1023) == 0 && budget_ != nullptr && budget_->exhausted()) {
+        out_ = true;
+        return false;
+      }
+      if (frame.levels.empty()) {
+        if (!seed(frame)) {
+          return false;
+        }
+        continue;
+      }
+      Level & l = frame.levels.back();
+      const Schema & schema = schema_of(frame, l.choice);
+      if (l.by == Level::By::Leaf) {
+        out = std::move(l.choice);
+        frame.levels.pop_back();
+        if (valid(schema, out)) {
+          return true;
+        }
+        continue;
+      }
+      Choice next;
+      bool found = false;
+      if (l.by == Level::By::Fact) {
+        const Required & r = schema.required[l.index];
+        const std::set<Atom> & atoms = facts_[r.predicate];
+        for (auto it = l.any ? atoms.upper_bound(l.last) : atoms.begin();
+          it != atoms.end() && !found; ++it)
+        {
+          const Atom & atom = *it;
+          if (atom.size() != r.args.size() + 1) {
+            continue;
+          }
+          next = l.choice;
+          found = true;
+          for (size_t i = 0; found && i < r.args.size(); ++i) {
+            const Arg & x = r.args[i];
+            found = x.variable ? give(schema, next, x.index, atom[i + 1]) : x.index == atom[i + 1];
+          }
+          if (found) {
+            l.last = atom;
+            l.any = true;
+          }
+        }
+      } else {
+        for (; l.object < m_.objects.objects.items.size() && !found; ++l.object) {
+          next = l.choice;
+          found = give(schema, next, l.index, l.object);
+        }
+      }
+      if (!found) {
+        frame.levels.pop_back();
+        continue;
+      }
+      frame.levels.push_back(level(schema, std::move(next)));
+    }
   }
 
   const sem::ObjectInfo & object(uint32_t o) const
@@ -702,65 +854,20 @@ private:
     return true;
   }
 
-  // Every way of completing `choice` for the schema: values from the atoms that its
-  // precondition requires, by type for the other parameters that need one now; the constraints,
-  // the types of the subtasks' arguments and the precondition hold
-  void choices(const Schema & schema, Choice choice, std::vector<Choice> & out)
+  // The constraints, the types of the subtasks' arguments and the precondition hold
+  bool valid(const Schema & schema, const Choice & choice)
   {
-    if (out_ || ((++work_ & 4095) == 0 && budget_ != nullptr && budget_->exhausted())) {
-      out_ = true;
-      return;
-    }
-    for (const Required & r : schema.required) {
-      if (std::none_of(r.args.begin(), r.args.end(),
-        [&](const Arg & x) {return x.variable && open(choice, x.index);}))
-      {
-        continue;
-      }
-      // Nothing below changes the state
-      for (const Atom & atom : facts_[r.predicate]) {
-        if (atom.size() != r.args.size() + 1) {
-          continue;
-        }
-        Choice next = choice;
-        bool match = true;
-        for (size_t i = 0; match && i < r.args.size(); ++i) {
-          const Arg & x = r.args[i];
-          match = x.variable ? give(schema, next, x.index, atom[i + 1]) : x.index == atom[i + 1];
-        }
-        if (match) {
-          choices(schema, std::move(next), out);
-        }
-      }
-      return;
-    }
-    for (uint32_t p = 0; p < schema.types.size(); ++p) {
-      if (!schema.needed[p] || !open(choice, p)) {
-        continue;
-      }
-      for (uint32_t o = 0; o < m_.objects.objects.items.size(); ++o) {
-        Choice next = choice;
-        if (give(schema, next, p, o)) {
-          choices(schema, std::move(next), out);
-        }
-      }
-      return;
-    }
-    if (out.size() >= kChoices) {
-      complete_ = false;
-      return;
-    }
     auto of = [&](const Arg & x) {return x.variable ? value(choice, choice.binding[x.index]) : x.index;};
     if (schema.network != nullptr) {
       for (const hddl::VarConstraint & c : schema.network->constraints) {
         if ((of(c.lhs) == of(c.rhs)) != c.equal) {
-          return;
+          return false;
         }
       }
       for (const hddl::SortConstraint & c : schema.network->sorts) {
         const uint32_t o = value(choice, choice.binding[c.param]);
         if (m_.domain.types.fits(object(o).types, c.types) == c.negated) {
-          return;
+          return false;
         }
       }
       for (const hddl::Step & step : schema.network->steps) {
@@ -771,7 +878,7 @@ private:
           }
           const uint32_t o = of(step.args[i]);
           if (o < kVariable && !fits(o, task.params[i])) {
-            return;
+            return false;
           }
         }
       }
@@ -783,17 +890,16 @@ private:
           value(choice, choice.binding[schema.condition_params[p]]));
       }
       if (!domain_.holds(schema.condition->precondition, state_, env)) {
-        return;
+        return false;
       }
     }
-    out.push_back(std::move(choice));
+    return true;
   }
 
-  // Goes the next way of `frame`: false if it does not fit after all (the frame is to be
+  // Goes that way of `frame`: false if it does not fit after all (the frame is to be
   // restored). `current` is then the first pending task
-  bool take(Frame & frame, uint32_t & current)
+  bool take(const Frame & frame, Choice choice, uint32_t & current)
   {
-    Choice choice = std::move(frame.choices[frame.next++]);
     for (const auto & [variable, to] : choice.assigned) {
       if (!same(variable, to)) {
         return false;
@@ -960,7 +1066,8 @@ private:
   Result last_;
   uint32_t current_ = kNone;                       // the first pending task
   bool forward_ = false;
-  size_t stored_ = 0;
+  uint32_t repeats_ = 0;                           // of a task from itself, allowed
+  bool cut_ = false;                               // some were left out for that
   Interpreter domain_;
   Interpreter problem_;
   Schema initial_;

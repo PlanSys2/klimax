@@ -32,7 +32,7 @@ namespace
 
 // A robot that carries items along a line of rooms a - b - c - d. `bring-it` leaves the robot
 // free, `go-step` the next room and `tour-two` two rooms that nothing fixes until `go` does;
-// `fly` needs wings nobody has
+// `fly` needs wings nobody has; `walk` is written from the end, so it comes first from itself
 const char * kDomain =
   "(define (domain d) (:requirements :typing :hierarchy :negative-preconditions)\n"
   " (:types robot room item)\n"
@@ -42,6 +42,11 @@ const char * kDomain =
   " (:task bring :parameters (?i - item ?to - room))\n"
   " (:task tour :parameters (?r - robot))\n"
   " (:task fly :parameters (?r - robot ?to - room))\n"
+  " (:task walk :parameters (?r - robot ?to - room))\n"
+  " (:method walk-more :parameters (?r - robot ?mid ?to - room) :task (walk ?r ?to)\n"
+  "  :precondition (link ?mid ?to) :ordered-subtasks (and (walk ?r ?mid) (move ?r ?mid ?to)))\n"
+  " (:method walk-here :parameters (?r - robot ?to - room) :task (walk ?r ?to)\n"
+  "  :precondition (at ?r ?to))\n"
   " (:method go-here :parameters (?r - robot ?to - room) :task (go ?r ?to)\n"
   "  :precondition (at ?r ?to))\n"
   " (:method go-step :parameters (?r - robot ?from ?mid ?to - room) :task (go ?r ?to)\n"
@@ -170,6 +175,18 @@ TEST(LiftedTest, GoesOnAfterTheBudgetRanOut)
   }
   EXPECT_EQ(solve("(:htn :ordered-subtasks (and (go r1 c)))", "(:goal (seen a))", 2).result.outcome,
     Outcome::Unsolvable);
+}
+
+TEST(LiftedTest, RecursionThatDoesNotProgress)
+{
+  // `walk` comes first from itself, before any action: to a from b, to b from a...
+  Solved s = solve("(:htn :ordered-subtasks (and (walk r1 d) (walk r2 a)))");
+  ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
+  EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
+  EXPECT_EQ(s.result.steps, 6u);
+  // Without a plan, how many times `walk` should come from itself has no end: it gives up
+  EXPECT_EQ(solve("(:htn :ordered-subtasks (and (walk r1 d)))", "(:goal (seen a))").result.outcome,
+    Outcome::OutOfBudget);
 }
 
 TEST(LiftedTest, TotalOrderOnly)

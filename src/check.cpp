@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <map>
 #include <new>
 #include <optional>
@@ -322,6 +323,7 @@ SolveResult solve(
   bool lifted_ended = !model->total_order;
   bool answered = false;
   double lifted_seconds = 0.0;
+  uint64_t lifted_expansions = 0;
   auto run_lifted = [&](std::optional<Clock::time_point> until) {
       const Clock::time_point from = Clock::now();
       kairos::BudgetConfig limits;
@@ -335,6 +337,7 @@ SolveResult solve(
         r.outcome = search::Outcome::Unsupported;
       }
       lifted_seconds += seconds_since(from);
+      lifted_expansions = r.expansions;
       lifted_ended = r.outcome != search::Outcome::OutOfBudget || !r.message.empty();
       if (r.outcome == search::Outcome::Solved || r.outcome == search::Outcome::Unsolvable) {
         found = std::move(r);
@@ -347,6 +350,14 @@ SolveResult solve(
         std::chrono::duration<double>(seconds));
     };
   const bool sharing = !lifted_ended && !options.anytime;
+  if (sharing && std::getenv("KLIMAX_NOT_GROUNDED") != nullptr) {
+    run_lifted(deadline);  // for measuring: that search alone
+    if (!answered) {
+      found.outcome = search::Outcome::OutOfBudget;
+      found.expansions = lifted_expansions;
+      answered = true;
+    }
+  }
   if (sharing) {
     run_lifted(sooner(in(kLiftedFirst)));
   }

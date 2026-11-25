@@ -122,6 +122,15 @@ TEST(NumericTest, NumbersInTheGoal)
   EXPECT_EQ(s.ground.plan.find("fill c"), std::string::npos) << s.ground.plan;
 }
 
+TEST(NumericTest, NotEqual)
+{
+  // The same with a negated equality: buying 5 is what the goal refuses
+  Solved s = solve("(station b) (station c)", "(:goal (and (at d) (not (= (bought) 5))))");
+  EXPECT_TRUE(s.lifted_valid) << s.lifted.message << s.lifted.plan;
+  EXPECT_TRUE(s.ground_valid) << s.ground.message << s.ground.plan;
+  EXPECT_EQ(s.ground.plan.find("fill c"), std::string::npos) << s.ground.plan;
+}
+
 TEST(NumericTest, SatisfiabilityLeavesNumbersToTheOthers)
 {
   Solved s = solve("(station b)");

@@ -29,7 +29,7 @@ if result.status == klimax.Status.SOLVED:
 - `verify(domain, problem, plan, decomposition=False)`: whether a plan in the IPC format
   solves the problem, and why not; with `decomposition`, a valid plan also as steps.
 
-Hierarchical problems without time or numbers, with total or partial order. To build from
+Hierarchical problems with total or partial order and numeric fluents; without time. To build from
 source, Kairos must be installed with `-DKAIROS_INSTALL_CORE=ON`:
 
 ```

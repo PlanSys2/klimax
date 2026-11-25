@@ -108,5 +108,43 @@ def test_anytime():
     assert first.plans == 1 and not first.optimal and first.steps >= result.steps
 
 
+TRIP_DOMAIN = """
+(define (domain trip) (:requirements :typing :hierarchy :numeric-fluents)
+ (:types place) (:predicates (at ?l - place) (road ?a ?b - place) (station ?l - place))
+ (:functions (fuel) (need ?a ?b - place))
+ (:task go :parameters (?to - place))
+ (:method there :parameters (?to - place) :task (go ?to) :precondition (at ?to))
+ (:method step :parameters (?to ?a ?b - place) :task (go ?to) :precondition (at ?a)
+  :ordered-subtasks (and (move ?a ?b) (go ?to)))
+ (:method refuel :parameters (?to ?l - place) :task (go ?to) :precondition (< (fuel) 3)
+  :ordered-subtasks (and (fill ?l) (go ?to)))
+ (:action move :parameters (?a ?b - place)
+  :precondition (and (at ?a) (road ?a ?b) (>= (fuel) (need ?a ?b)))
+  :effect (and (not (at ?a)) (at ?b) (decrease (fuel) (need ?a ?b))))
+ (:action fill :parameters (?l - place)
+  :precondition (and (at ?l) (station ?l) (< (fuel) 5)) :effect (assign (fuel) 5)))
+"""
+TRIP = """
+(define (problem p) (:domain trip) (:objects a b c d - place)
+ (:htn :ordered-subtasks (and (go d)))
+ (:init (at a) (road a b) (road b c) (road c d) (= (fuel) 5) %s
+  (= (need a b) 3) (= (need b c) 2) (= (need c d) 3)))
+"""
+
+
+def test_numbers():
+    # 5 - 3 = 2 at b: enough to reach c but not d from there, so it fills up at b
+    problem = TRIP % "(station b)"
+    assert klimax.check(TRIP_DOMAIN, problem).ok
+    result = klimax.solve(TRIP_DOMAIN, problem, timeout=10)
+    assert result.status == klimax.Status.SOLVED, result.message
+    assert result.steps == 4 and "fill b" in result.plan
+    assert klimax.verify(TRIP_DOMAIN, problem, result.plan).valid
+    # The same plan where b has no station is not one, and there is none
+    dry = TRIP % ""
+    assert not klimax.verify(TRIP_DOMAIN, dry, result.plan).valid
+    assert klimax.solve(TRIP_DOMAIN, dry, timeout=10).status == klimax.Status.UNSOLVABLE
+
+
 def test_version():
     assert klimax.__version__.count(".") == 2

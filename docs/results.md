@@ -127,27 +127,39 @@ in memory and stops at its limit in Colouring, Rover and Transport.
 ## Numbers
 
 The numeric HTN benchmark of Quenard et al. ([HTN-Numerical-Benchmarks](https://github.com/gaspard-quenard/HTN-Numerical-Benchmarks)):
-seven families of 20 problems with numeric fluents. Klimax at 30 s per problem, one core:
+seven families of 20 problems with numeric fluents. At 30 s per problem, one core and 8 GB:
 
-| Family | Solved |
-|---|---|
-| Alchemy | 20 |
-| Backpack | 18 |
-| Gripper_colors | 16 |
-| Minecraft | 20 |
-| Overcooked | 19 |
-| Transport_fuel | 6 |
-| Transvasement | 20 |
-| **Total** | **119 of 140** |
+| Family | Klimax | Aries |
+|---|---|---|
+| Alchemy | 20 | 8 |
+| Backpack | 18 | 3 |
+| Gripper_colors | 16 | 8 |
+| Minecraft | 20 | 3 |
+| Overcooked | 19 | 0 |
+| Transport_fuel | 13 | 1 |
+| Transvasement | 20 | 6 |
+| **Total** | **126 of 140** | **29 of 140** |
 
-The paper that presents the benchmark (Quenard et al., HPlan 2026) reports 91 for its planner
-SibylSmt, 48 for Aries and 42 for SIADEX, with 10 minutes per problem on another machine: those
-figures are theirs, not measured here.
+Within 100 ms and within 1 s Klimax solves 92 and 105. Aries solves 2 and 12 counting only
+its solver, since it is run from Python (below), which takes half a second more.
 
-No other verifier reads hierarchical plans with numbers: these plans are checked by Klimax's
-own, which is independent of its searches. In Transport_fuel the plan depends on where the
-truck fills up, which the heuristics do not see; one of its methods leaves its subtasks without
-an order, so by the semantics of HDDL it is a partially ordered domain.
+- Aries is `up-aries` 0.5.0, through Unified Planning: its own HDDL reader takes no numbers,
+  and it takes no real fluents, so the numeric fluents are declared as integers (every value
+  in the benchmark is one). It does not always stop at its time limit: it is stopped then.
+  Of the 111 it does not solve, 96 run out of time and 15 end without an answer (11 of them
+  in Overcooked).
+- Klimax solves every problem that Aries solves. In those 29 the plans of Aries add up to
+  647 actions and those of Klimax to 689.
+- The paper that presents the benchmark (Quenard et al., HPlan 2026) reports 91 for its
+  planner SibylSmt, 48 for Aries and 42 for SIADEX, with 10 minutes per problem on another
+  machine: those figures are theirs. No public code of SibylSmt was found to measure it here.
+- No other verifier reads hierarchical plans with numbers: the plans of both are checked by
+  Klimax's own, which is independent of its searches.
+- In Transport_fuel the plan depends on where each truck fills up. No heuristic of Klimax
+  reads the numbers; what finds those plans is that a task still to do always counts at
+  least the fewest actions it takes, so going to fill up once more is never free. One of the
+  methods of that domain leaves its subtasks without an order: by the semantics of HDDL it
+  is a partially ordered domain.
 
 ## Notes
 

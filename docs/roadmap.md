@@ -29,8 +29,10 @@ in [baseline.md](baseline.md).
   leave many parameters free (Woodworking, Monroe).
 - **Numbers** (H5): numeric fluents in the conditions and effects of actions and methods and
   in the goal, in the verifier and in two of the three searches (the one by satisfiability
-  leaves those problems to the others). The heuristics do not see the numbers yet: where a
-  resource decides the plan (fuel), the search is blind to it.
+  leaves those problems to the others); in the Python module and in Unified Planning too.
+  The heuristics do not see the numbers: where a resource decides the plan (fuel), what
+  finds it is the search, which counts every pending task at least by the fewest actions it
+  takes, so that repeating a detour is never free.
 - **Anytime and optimal** (H4): after the first plan Klimax looks for shorter ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans

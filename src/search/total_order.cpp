@@ -1590,9 +1590,10 @@ private:
       // A comparison with something that has no value does not hold
       const double l = number(n.lhs);
       const double r = number(n.rhs);
-      const bool ok = n.op == ground::CompareOp::Eq ? l == r : n.op == ground::CompareOp::Lt ?
-        l < r : n.op == ground::CompareOp::Le ? l <= r : n.op == ground::CompareOp::Gt ? l > r :
-        l >= r;
+      // Ne is the negation of an equality: it holds too when one side has no value
+      const bool ok = n.op == ground::CompareOp::Eq ? l == r : n.op == ground::CompareOp::Ne ?
+        !(l == r) : n.op == ground::CompareOp::Lt ? l < r : n.op == ground::CompareOp::Le ?
+        l <= r : n.op == ground::CompareOp::Gt ? l > r : l >= r;
       if (!ok) {
         return false;
       }
@@ -1822,6 +1823,7 @@ private:
         }
       }
       uint64_t h = 0;
+      uint64_t own = 0;  // of it, what the subtasks of the method take by themselves
       if (possible && plan_costs_[relaxed_->ordered() ? 1 : 0]) {
         // The actions of one relaxed plan for everything left: the subtasks, the stack and
         // the goal. What several of them need is counted once.
@@ -1830,11 +1832,14 @@ private:
         auto task = [&](uint32_t t) {
             const uint32_t c = relaxed_->task(t);
             possible = possible && c != Relaxed::kUnreached;
-            h += c >= Relaxed::kFar ? c : relaxed_->plan_task(t);
+            // A task repeated adds nothing to the plan but still has to be done
+            h += c >= Relaxed::kFar ? c : least_too_ ?
+              std::max<uint64_t>(relaxed_->plan_task(t), task_cost_[t]) : relaxed_->plan_task(t);
           };
         for (size_t k = done; k < order.size() && possible; ++k) {
           task(method.subtasks[order[k]]);
         }
+        own = h;
         uint32_t c = below;
         for (int depth = 0; c != kNone && depth < 64 && possible; ++depth) {
           task(bf_->cells[c].task);
@@ -1886,7 +1891,11 @@ private:
       bf_->nodes.push_back(child);
       // Lowest cost first
       h = std::min<uint64_t>(h, 0xffffffffull);
-      const uint64_t age = bf_oldest_first_ ? bf_->nodes.size() : 0xffffffffull - bf_->nodes.size();
+      // Among equals, the method that takes least by itself: what the rest of the stack also
+      // needs is counted once, which hides the difference between a short way and a long one.
+      // Then the oldest (the node index breaks the tie).
+      const uint64_t age = bf_oldest_first_ ? (own_first_ ? std::min<uint64_t>(own, 0xffffffffull) :
+        bf_->nodes.size()) : 0xffffffffull - bf_->nodes.size();
       bf_->open.emplace_back((h << 32) | age, static_cast<uint32_t>(bf_->nodes.size() - 1));
       std::push_heap(bf_->open.begin(), bf_->open.end(), std::greater<>());
     }
@@ -2761,6 +2770,8 @@ private:
   // with the ordered relaxation; the free one keeps the sum. Measured at 1 s on the total-order
   // benchmark of IPC 2023: 440 solved so, 429 with plans in both, 423 with them only in the free
   // one, 421 with sums in both (KLIMAX_PLAN_COSTS=ab: a for the free one, b for the ordered)
+  bool own_first_ = std::getenv("KLIMAX_NO_OWN") == nullptr;
+  bool least_too_ = std::getenv("KLIMAX_NO_LEAST") == nullptr;
   bool plan_costs_[2] = {
     std::getenv("KLIMAX_PLAN_COSTS") != nullptr && std::getenv("KLIMAX_PLAN_COSTS")[0] == '1',
     std::getenv("KLIMAX_PLAN_COSTS") == nullptr || std::getenv("KLIMAX_PLAN_COSTS")[1] == '1'};

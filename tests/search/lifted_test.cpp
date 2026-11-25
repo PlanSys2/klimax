@@ -123,6 +123,7 @@ TEST(LiftedTest, PlansWithoutGrounding)
   ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
   EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
   EXPECT_GT(s.result.steps, 4u);
+  EXPECT_EQ(s.result.plans, 1u);
 }
 
 TEST(LiftedTest, ParametersLeftForLater)

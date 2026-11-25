@@ -238,6 +238,7 @@ private:
           result.outcome = Outcome::Solved;
           result.plan = plan();
           result.steps = sequence_.size();
+          result.plans = 1;
           result.message = "depth first, not grounded";
           return;
         }

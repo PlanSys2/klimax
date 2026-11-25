@@ -54,6 +54,9 @@ public:
   /// the budget ran out, another call goes on from where that one stopped.
   Result run(kairos::Budget * budget = nullptr);
 
+  /// @brief The layers of decomposition made so far.
+  size_t layers() const;
+
 private:
   class Impl;
   std::unique_ptr<Impl> impl_;

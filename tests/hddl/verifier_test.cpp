@@ -195,16 +195,56 @@ TEST(VerifierTest, PartialOrder)
   EXPECT_FALSE(o.valid);
 }
 
+TEST(VerifierTest, Numbers)
+{
+  // `a` needs one unit of (f) and takes it; `b` puts back what (g) says, which has no value
+  // until `c` gives it one
+  auto outcome = [](std::string_view steps, std::string_view plan) {
+      auto d = hddl::parse_domain(
+        "(define (domain d) (:requirements :hierarchy :numeric-fluents) (:predicates (p))\n"
+        " (:functions (f) (g)) (:task t :parameters ())\n"
+        " (:method m :parameters () :task (t) :ordered-subtasks (and " + std::string(steps) +
+        "))\n"
+        " (:action a :parameters () :precondition (>= (f) 1) :effect (and (p) (decrease (f) 1)))\n"
+        " (:action b :parameters () :effect (increase (f) (* 2 (g))))\n"
+        " (:action c :parameters () :precondition (< (f) 1) :effect (assign (g) (+ (f) 0.5))))",
+        "d.hddl");
+      auto p = hddl::parse_problem(
+        "(define (problem p) (:domain d) (:htn :subtasks (t)) (:init (= (f) 2))"
+        " (:goal (and (p) (= (f) 0))))", "p.hddl");
+      EXPECT_TRUE(d.ok() && p.ok());
+      auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
+      EXPECT_TRUE(m.ok());
+      return verify(m.value(), std::string(plan));
+    };
+  Outcome o = outcome("(a) (a)", "==>\n1 a\n2 a\nroot 3\n3 t -> m 1 2\n<==\n");
+  EXPECT_TRUE(o.valid) << o.reason;
+  // The third one finds nothing left
+  o = outcome("(a) (a) (a)", "==>\n1 a\n2 a\n4 a\nroot 3\n3 t -> m 1 2 4\n<==\n");
+  EXPECT_FALSE(o.valid);
+  EXPECT_NE(o.reason.find("not applicable"), std::string::npos) << o.reason;
+  // One left: the goal wants none
+  o = outcome("(a)", "==>\n1 a\nroot 3\n3 t -> m 1\n<==\n");
+  EXPECT_FALSE(o.valid);
+  // (g) has no value yet
+  o = outcome("(a) (b)", "==>\n1 a\n2 b\nroot 3\n3 t -> m 1 2\n<==\n");
+  EXPECT_FALSE(o.valid);
+  EXPECT_NE(o.reason.find("no value"), std::string::npos) << o.reason;
+  // 2 - 1 - 1 = 0; (g) = 0.5; back to 1; and to 0
+  o = outcome("(a) (a) (c) (b) (a)",
+      "==>\n1 a\n2 a\n4 c\n5 b\n6 a\nroot 3\n3 t -> m 1 2 4 5 6\n<==\n");
+  EXPECT_TRUE(o.valid) << o.reason;
+}
+
 TEST(VerifierTest, UnsupportedIsNeverAccepted)
 {
   auto d = hddl::parse_domain(
-    "(define (domain d) (:requirements :hierarchy :numeric-fluents) (:predicates (p))\n"
-    " (:functions (f)) (:task t :parameters ())\n"
+    "(define (domain d) (:requirements :hierarchy :timed-initial-literals) (:predicates (p))\n"
+    " (:task t :parameters ())\n"
     " (:method m :parameters () :task (t) :ordered-subtasks (a))\n"
-    " (:action a :parameters () :precondition (>= (f) 1) :effect (and (p) (decrease (f) 1))))",
-    "d.hddl");
+    " (:action a :parameters () :effect (p)))", "d.hddl");
   auto p = hddl::parse_problem(
-    "(define (problem p) (:domain d) (:htn :subtasks (t)) (:init (= (f) 2)))", "p.hddl");
+    "(define (problem p) (:domain d) (:htn :subtasks (t)) (:init (at 5 (p))))", "p.hddl");
   ASSERT_TRUE(d.ok() && p.ok());
   auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
   ASSERT_TRUE(m.ok());

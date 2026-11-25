@@ -18,8 +18,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -67,6 +69,17 @@ struct AtomHash
 
 using State = std::unordered_set<Atom, AtomHash>;
 
+// The values of the numeric fluents that have one: function, then objects
+using Values = std::unordered_map<Atom, double, AtomHash>;
+
+// A fluent takes a value; not a number if it could not be computed (it read a fluent with no
+// value, or divided by zero)
+struct Change
+{
+  Atom fluent;
+  double value;
+};
+
 // Values of the variables in scope: innermost last
 using Env = std::vector<std::pair<Symbol, uint32_t>>;
 
@@ -76,6 +89,82 @@ class Interpreter
 public:
   Interpreter(const Model & model, const ast::Nodes & nodes, const kairos::SymbolTable & symbols)
   : m_(model), nodes_(nodes), symbols_(symbols) {}
+
+  /// The values that numeric conditions and effects read from then on (none: no numbers)
+  void numbers(const Values * values) {values_ = values;}
+
+  // The value of a numeric expression, if all it reads has one
+  std::optional<double> number(ast::ExprId id, const Env & env)
+  {
+    const ast::Expr & e = nodes_.exprs[id];
+    auto child = [&](size_t i) {return number(e.children.at(i), env);};
+    switch (e.kind) {
+      case ast::ExprKind::Number:
+        return e.number;
+      case ast::ExprKind::Function: {
+          if (values_ == nullptr) {
+            invalid("unsupported: numeric fluents");
+          }
+          const auto found = values_->find(fluent(e, env));
+          return found == values_->end() ? std::nullopt : std::optional<double>(found->second);
+        }
+      case ast::ExprKind::Add:
+      case ast::ExprKind::Mul: {
+          double total = e.kind == ast::ExprKind::Add ? 0.0 : 1.0;
+          for (size_t i = 0; i < e.children.size(); ++i) {
+            const std::optional<double> v = child(i);
+            if (!v) {
+              return std::nullopt;
+            }
+            total = e.kind == ast::ExprKind::Add ? total + *v : total * *v;
+          }
+          return total;
+        }
+      case ast::ExprKind::Sub:
+      case ast::ExprKind::Div: {
+          const std::optional<double> a = child(0);
+          const std::optional<double> b = child(1);
+          if (!a || !b || (e.kind == ast::ExprKind::Div && *b == 0.0)) {
+            return std::nullopt;
+          }
+          return e.kind == ast::ExprKind::Sub ? *a - *b : *a / *b;
+        }
+      case ast::ExprKind::Neg: {
+          const std::optional<double> a = child(0);
+          return a ? std::optional<double>(-*a) : std::nullopt;
+        }
+      default:
+        invalid("unsupported: this numeric expression");
+    }
+  }
+
+  // The fluent that a function expression names: function, then objects
+  Atom fluent(const ast::Expr & e, const Env & env)
+  {
+    Atom key;
+    key.reserve(e.args.size() + 1);
+    key.push_back(function(e.name));
+    for (ast::TermId t : e.args) {
+      key.push_back(object(t, env));
+    }
+    return key;
+  }
+
+  uint32_t function(Symbol name)
+  {
+    uint32_t & cached = slot(functions_, name);
+    if (cached == kNone) {
+      auto found = m_.domain.functions.find(symbols_.name(name));
+      if (!found) {
+        invalid("internal: unknown function " + std::string(symbols_.name(name)));
+      }
+      if (!m_.domain.functions.items[*found].numeric) {
+        invalid("unsupported: object fluents");
+      }
+      cached = found->value();
+    }
+    return cached;
+  }
 
   bool holds(ast::FormulaId id, const State & state, Env & env)
   {
@@ -104,12 +193,25 @@ public:
       case ast::FormulaKind::Compare: {
           const ast::Expr & l = nodes_.exprs[f.lhs];
           const ast::Expr & r = nodes_.exprs[f.rhs];
-          if (f.compare != ast::CompareOp::Eq || l.kind != ast::ExprKind::Term ||
-            r.kind != ast::ExprKind::Term)
-          {
-            invalid("unsupported: numeric conditions");
+          if (l.kind == ast::ExprKind::Term && r.kind == ast::ExprKind::Term) {
+            if (f.compare != ast::CompareOp::Eq) {
+              invalid("unsupported: an order between objects");
+            }
+            return object(l.term, env) == object(r.term, env);
           }
-          return object(l.term, env) == object(r.term, env);
+          // A comparison that reads a fluent with no value does not hold
+          const std::optional<double> a = number(f.lhs, env);
+          const std::optional<double> b = number(f.rhs, env);
+          if (!a || !b) {
+            return false;
+          }
+          switch (f.compare) {
+            case ast::CompareOp::Eq: return *a == *b;
+            case ast::CompareOp::Lt: return *a < *b;
+            case ast::CompareOp::Le: return *a <= *b;
+            case ast::CompareOp::Gt: return *a > *b;
+            default: return *a >= *b;
+          }
         }
       default:
         invalid("unsupported: temporal conditions, preferences or trajectory constraints");
@@ -132,27 +234,28 @@ public:
   const ast::Formula & formula(ast::FormulaId id) const {return nodes_.formulas[id];}
   const ast::Term & term(ast::TermId id) const {return nodes_.terms[id];}
 
-  // Collects what `id` adds and deletes when applied in `state`
+  // Collects what `id` adds and deletes when applied in `state`, and the values that the
+  // fluents take (all read before any is given), if `changes` is there to collect them
   void effect(
     ast::EffectId id, const State & state, Env & env, std::vector<Atom> & adds,
-    std::vector<Atom> & deletes)
+    std::vector<Atom> & deletes, std::vector<Change> * changes = nullptr)
   {
     const ast::Effect & e = nodes_.effects[id];
     switch (e.kind) {
       case ast::EffectKind::And:
         for (ast::EffectId c : e.children) {
-          effect(c, state, env, adds, deletes);
+          effect(c, state, env, adds, deletes, changes);
         }
         return;
       case ast::EffectKind::Forall:
         quantified(e.params, 0, env, true, [&]() {
-            effect(e.children.at(0), state, env, adds, deletes);
+            effect(e.children.at(0), state, env, adds, deletes, changes);
             return true;
           });
         return;
       case ast::EffectKind::When:
         if (holds(e.condition, state, env)) {
-          effect(e.children.at(0), state, env, adds, deletes);
+          effect(e.children.at(0), state, env, adds, deletes, changes);
         }
         return;
       case ast::EffectKind::Add:
@@ -167,7 +270,26 @@ public:
           if (std::string_view(symbols_.name(target.name)) == "total-cost") {
             return;
           }
-          invalid("unsupported: numeric effects");
+          if (changes == nullptr || target.kind != ast::ExprKind::Function) {
+            invalid("unsupported: numeric effects");
+          }
+          Change change{fluent(target, env), std::numeric_limits<double>::quiet_NaN()};
+          const std::optional<double> by = number(e.value, env);
+          const std::optional<double> old =
+            e.op == ast::AssignOp::Assign ? std::optional<double>(0.0) : number(e.target, env);
+          if (by && old) {
+            switch (e.op) {
+              case ast::AssignOp::Assign: change.value = *by; break;
+              case ast::AssignOp::Increase: change.value = *old + *by; break;
+              case ast::AssignOp::Decrease: change.value = *old - *by; break;
+              case ast::AssignOp::ScaleUp: change.value = *old * *by; break;
+              default:
+                change.value = *by == 0.0 ? change.value : *old / *by;
+                break;
+            }
+          }
+          changes->push_back(std::move(change));
+          return;
         }
       default:
         invalid("unsupported: temporal effects");
@@ -285,6 +407,8 @@ private:
   const kairos::SymbolTable & symbols_;
   std::vector<uint32_t> objects_;
   std::vector<uint32_t> predicates_;
+  std::vector<uint32_t> functions_;
+  const Values * values_ = nullptr;
 };
 
 }  // namespace klimax::verifier

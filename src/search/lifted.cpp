@@ -19,6 +19,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <memory>
 #include <set>
@@ -166,6 +169,7 @@ struct Frame
   size_t nodes;
   size_t sequence;
   size_t trail;
+  size_t numbers;
   size_t variables;
   size_t bound;
   size_t typed;
@@ -209,10 +213,9 @@ private:
   {
     finished_ = true;
     if (!started_) {
-      if (!m_.total_order) {
-        result.message = "the search that does not ground takes totally ordered problems only";
-        return;
-      }
+      // A partially ordered network is taken in one of the orders it allows: a plan found is a
+      // plan, and none found proves nothing
+      complete_ = m_.total_order;
       if (!m_.pddl.durative_actions.empty() || !m_.pddl.derived.empty() ||
         m_.problem.constraints.valid() || m_.pddl.constraints.valid())
       {
@@ -332,6 +335,20 @@ private:
       }
       const Cell cell = cells_[current];
       ++expansions_;
+      if (trace_ && (expansions_ & 0x7ffff) == 0) {
+        std::string doing;
+        for (size_t i = sequence_.size() > 12 ? sequence_.size() - 12 : 0; i < sequence_.size(); ++i) {
+          const Node & n = nodes_[sequence_[i]];
+          doing += " " + m_.tasks[TaskId(n.task)].name;
+          for (size_t k = 0; k < m_.tasks[TaskId(n.task)].params.size(); ++k) {
+            const uint32_t v = value(args_[n.args + k]);
+            doing += v < kVariable ? "_" + object(v).name : "_?";
+          }
+        }
+        std::fprintf(stderr, "lifted: %llu expansions, %zu actions, %zu frames, %zu cells, "
+          "repeats %u:%s\n", static_cast<unsigned long long>(expansions_), sequence_.size(),
+          frames_.size(), cells_.size(), repeats_, doing.c_str());
+      }
       const hddl::TaskInfo & task = m_.tasks[TaskId(cell.task)];
       if (task.primitive) {
         Choice choice;
@@ -484,9 +501,13 @@ private:
       if (node.task != cell.task || node.state != state_hash_) {
         continue;
       }
+      // Two arguments with no value yet are the same one: any value the one can take, the
+      // other can
       bool same = true;
       for (size_t i = 0; same && i < task.params.size(); ++i) {
-        same = value(args_[node.args + i]) == value(args_[cell.args + i]);
+        const uint32_t a = value(args_[node.args + i]);
+        const uint32_t b = value(args_[cell.args + i]);
+        same = a == b || (a >= kVariable && b >= kVariable);
       }
       if (same && ++times > repeats_) {
         return true;
@@ -1003,20 +1024,53 @@ private:
     facts_.resize(m_.domain.predicates.items.size());
     Env env;
     for (const ast::InitItem & item : m_.problem.init) {
-      if (item.kind != ast::InitItem::Kind::Fact) {
-        const std::string_view name = m_.problem.symbols.name(item.name);
-        auto f = m_.domain.functions.find(name);
-        if (name == "total-cost" || (f && !m_.domain.functions.items[*f].changes)) {
-          continue;
-        }
-        verifier::invalid("unsupported: numeric fluents");
-      }
       if (item.time || item.negated) {
         verifier::invalid("unsupported: timed initial literals");
       }
+      if (item.kind != ast::InitItem::Kind::Fact) {
+        if (m_.problem.symbols.name(item.name) == std::string_view("total-cost")) {
+          continue;
+        }
+        Atom fluent{problem_.function(item.name)};
+        for (ast::TermId t : item.args) {
+          fluent.push_back(problem_.object(t, env));
+        }
+        const std::optional<double> value = problem_.number(item.value, env);
+        if (!value) {
+          verifier::invalid("unsupported: this initial value");
+        }
+        set(std::move(fluent), *value);
+        continue;
+      }
       add(problem_.atom(item.name, item.args, env));
     }
+    domain_.numbers(&values_);
+    problem_.numbers(&values_);
     trail_.clear();
+    numbers_.clear();
+  }
+
+  static uint64_t hash_with(const Atom & fluent, double value)
+  {
+    uint64_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value));
+    std::memcpy(&bits, &value, sizeof(bits));
+    return mix(hash_of(fluent) ^ mix(bits + 0x9e3779b97f4a7c15ull));
+  }
+
+  // A numeric fluent takes a value
+  void set(Atom fluent, double value)
+  {
+    auto [it, fresh] = values_.emplace(fluent, value);
+    if (!fresh && it->second == value) {
+      return;
+    }
+    if (!fresh) {
+      state_hash_ ^= hash_with(fluent, it->second);
+    }
+    numbers_.push_back(Number{std::move(fluent), !fresh, fresh ? 0.0 : it->second});
+    it->second = value;
+    state_hash_ ^= hash_with(numbers_.back().fluent, value);
   }
 
   bool add(Atom atom)
@@ -1048,6 +1102,7 @@ private:
     frame.nodes = nodes_.size();
     frame.sequence = sequence_.size();
     frame.trail = trail_.size();
+    frame.numbers = numbers_.size();
     frame.variables = variables_.size();
     frame.bound = bound_.size();
     frame.typed = typed_.size();
@@ -1069,6 +1124,15 @@ private:
         state_.insert(std::move(atom));
       }
       trail_.pop_back();
+    }
+    while (numbers_.size() > frame.numbers) {
+      Number & n = numbers_.back();
+      if (n.had) {
+        values_[n.fluent] = n.old;
+      } else {
+        values_.erase(n.fluent);
+      }
+      numbers_.pop_back();
     }
     state_hash_ = frame.state_hash;
     while (typed_.size() > frame.typed) {
@@ -1404,12 +1468,21 @@ private:
     if (a.effect.valid()) {
       std::vector<Atom> adds;
       std::vector<Atom> deletes;
-      domain_.effect(a.effect, state_, env, adds, deletes);
+      std::vector<verifier::Change> changes;
+      domain_.effect(a.effect, state_, env, adds, deletes, &changes);
+      for (const verifier::Change & change : changes) {
+        if (change.value != change.value) {
+          return false;  // it reads a number with no value
+        }
+      }
       for (const Atom & d : deletes) {
         remove(d);
       }
       for (Atom & atom : adds) {
         add(std::move(atom));
+      }
+      for (verifier::Change & change : changes) {
+        set(std::move(change.fluent), change.value);
       }
     }
     return true;
@@ -1472,6 +1545,7 @@ private:
   Result last_;
   uint32_t current_ = kNone;                       // the first pending task
   bool forward_ = false;
+  bool trace_ = std::getenv("KLIMAX_TRACE_SEARCH") != nullptr;
   size_t longest_ = ~size_t{0};                    // actions allowed: fewer than the plan found
   bool improving_ = false;                         // a plan was found: looking for a shorter one
   Result best_;
@@ -1492,6 +1566,14 @@ private:
   State state_;
   std::vector<std::set<Atom>> facts_;              // the state by predicate, in a fixed order
   uint64_t state_hash_ = 0;
+  verifier::Values values_;                        // of the numeric fluents
+  struct Number
+  {
+    Atom fluent;
+    bool had;
+    double old;
+  };
+  std::vector<Number> numbers_;                    // values given, to undo
   std::vector<std::pair<bool, Atom>> trail_;       // added (true) or removed, to undo
   std::vector<Variable> variables_;
   std::vector<uint32_t> bound_;                    // variables given a value, to undo

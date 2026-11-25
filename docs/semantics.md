@@ -71,7 +71,10 @@ A solution is a sequence of ground actions together with a decomposition tree su
 state goal and no `:htn` section is a PDDL problem; Klimax passes it to Kairos.
 
 In L2, numeric conditions and effects follow PDDL 2.1 for sequential plans. A numeric method
-precondition is tested as in point 5.
+precondition is tested as in point 5. **[decision]** A fluent has no value until the initial
+state or an effect gives it one: a comparison that reads it does not hold, and an action with
+an effect that reads it (or that divides by zero) is not applicable. All the effects of an
+action read the state before it.
 
 ### 3.2 L3: temporal
 

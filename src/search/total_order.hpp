@@ -33,7 +33,7 @@ enum class Outcome : uint8_t
   Solved,
   Unsolvable,   // the whole space was searched
   OutOfBudget,
-  Unsupported   // a partial order, numbers, axioms: `message` says which
+  Unsupported   // a partial order, axioms, object fluents: `message` says which
 };
 
 struct Options
@@ -65,6 +65,9 @@ struct Result
  * the fewest the pending tasks can take (a lower bound from the decomposition graph) must not
  * exceed it. So the plan found is at most twice as long as needed by that measure, and a
  * recursion that does not progress is cut.
+ *
+ * The values of the numeric fluents are part of the state; the bounds and the relaxations do
+ * not look at numeric conditions, which only makes them more optimistic.
  *
  * Complete on a finite space when every task network is totally ordered. A partially ordered
  * network is searched in one of the orders it allows: a plan found is a plan, but none found

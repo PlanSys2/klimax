@@ -11,8 +11,8 @@ in [baseline.md](baseline.md).
 | H2 | done | Total-order search | Coverage at least that of the best planner of the baseline at 1 s and 30 s |
 | H3 | done | Partial order: one linearization of each network, and a search that interleaves | Coverage at least that of the best planner of the baseline |
 | H3b | done | Python module and Unified Planning engine ([up-klimax](https://github.com/PlanSys2/up-klimax)) | Hierarchical problems solved from Unified Planning, with the plans verified |
-| H4 | in progress | Anytime search, optimal plans, finer heuristics | Best satisficing score; optimal coverage at least that of the baseline |
-| H5 | next | Numbers | The numeric HTN benchmark |
+| H4 | done | Anytime search, optimal plans, finer heuristics | Best satisficing score; optimal coverage at least that of the baseline |
+| H5 | in progress | Numbers | More problems of the numeric HTN benchmark than its authors' planner |
 | H6 | planned | Time: the whole of HDDL 2.1, with a reference benchmark | Solves the benchmark with validated plans |
 | H7 | planned | Robustness, fuzzing, PlanSys2 plugin, version 1.0.0 | As Kairos |
 
@@ -27,6 +27,10 @@ in [baseline.md](baseline.md).
 - **By satisfiability** (H4): a problem is also searched as a formula, by layers
   of decomposition, with a SAT solver of its own. It is what solves the domains whose methods
   leave many parameters free (Woodworking, Monroe).
+- **Numbers** (H5): numeric fluents in the conditions and effects of actions and methods and
+  in the goal, in the verifier and in two of the three searches (the one by satisfiability
+  leaves those problems to the others). The heuristics do not see the numbers yet: where a
+  resource decides the plan (fuel), the search is blind to it.
 - **Anytime and optimal** (H4): after the first plan Klimax looks for shorter ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans
@@ -41,7 +45,7 @@ in [baseline.md](baseline.md).
   of ground methods, and the sharing of the time costs the other searches problems that they
   solved near the limit. Encoding the problem as written, as Lilotane does, would make it
   smaller.
-- Domains where a planner of the baseline solves more: Hiking, Logistics, Monroe (partially
+- Domains where a planner of the baseline solves more: Hiking, Lamps, Monroe (partially
   observable, total order), by one to three problems each.
 - An optimal search with an admissible heuristic. With partial order, a proof that does not
   keep every node in memory: it is what stops Klimax in Colouring, Rover and Transport, though
@@ -49,7 +53,8 @@ in [baseline.md](baseline.md).
 
 ## Known limits
 
-- Numbers, durative actions and temporal constraints are read by neither the planner nor the
-  verifier yet: they are reported as not supported, never accepted.
+- Durative actions and temporal constraints are read by neither the planner nor the verifier
+  yet: they are reported as not supported, never accepted. Of numbers, object fluents and the
+  metric are not read either.
 - With partial order, "unsolvable" is only answered when the search that interleaves exhausts
   its space; otherwise the answer is "not supported", with the reason.

@@ -42,8 +42,9 @@ namespace klimax::search
  * checked when the method is chosen.
  *
  * For problems whose ground form is too large, and for domains written as a recipe, where the
- * first method that applies is the right one. Totally ordered problems only (Unsupported
- * otherwise, with a message). Unsolvable when the whole space was searched. OutOfBudget with a
+ * first method that applies is the right one. A partially ordered network is taken in one of
+ * the orders it allows: a plan found is a plan, but none found proves nothing. Numeric fluents
+ * are part of the state. Unsolvable when the whole space was searched, with total order. OutOfBudget with a
  * message when it gives up, for its memory or for the recursion it cut: it does not go on then.
  */
 class LiftedSearch

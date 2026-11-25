@@ -8,7 +8,7 @@ The method is that of the baseline.
 
 | Planner | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 346 | 492 | 620 |
+| **Klimax** | 341 | 484 | 626 |
 | PandaDealer agile-1 | 155 | 318 | 494 |
 | PandaDealer agile-lama | 162 | 308 | 494 |
 | PANDA lamda | 140 | 278 | 487 |
@@ -23,27 +23,27 @@ The method is that of the baseline.
 | SIADEX | 16 | 83 | 120 |
 | Aries | 8 | 29 | 60 |
 
-By domain at 30 s, against the best of the other configurations in each domain (not one planner: the best of each row). Klimax is ahead in 12 domains, level in 8 and behind in 3.
+By domain at 30 s, against the best of the other configurations in each domain (not one planner: the best of each row). Klimax is ahead in 13 domains, level in 7 and behind in 3.
 
 | Domain | # | Klimax | Best other | Which |
 |---|---|---|---|---|
 | AssemblyHierarchical | 30 | **30** | **30** | PANDA lamda, PANDA ppro, PandaDealer agile-1, TOAD |
 | Barman-BDI | 20 | **20** | 19 | SIADEX |
 | Blocksworld-GTOHP | 30 | **30** | 29 | PANDA lamda, PANDA ppro |
-| Blocksworld-HPDDL | 30 | **29** | 24 | PandaDealer agile-1 |
-| Depots | 30 | **28** | 26 | Linear-Complex, Linear-Simple |
+| Blocksworld-HPDDL | 30 | **30** | 24 | PandaDealer agile-1 |
+| Depots | 30 | **29** | 26 | Linear-Complex, Linear-Simple |
 | Factories-simple | 20 | **9** | **9** | PANDA lamda, PandaDealer agile-lama |
-| Freecell-Learned-ECAI-16 | 60 | **14** | 7 | Linear-Complex |
+| Freecell-Learned-ECAI-16 | 60 | **13** | 7 | Linear-Complex |
 | Hiking | 30 | 22 | **25** | HyperTensioN |
-| Lamps | 30 | **17** | **17** | PandaDealer agile-1, PandaDealer agile-lama |
-| Logistics-Learned-ECAI-16 | 80 | 71 | **74** | PandaDealer agile-1 |
+| Lamps | 30 | 16 | **17** | PandaDealer agile-1, PandaDealer agile-lama |
+| Logistics-Learned-ECAI-16 | 80 | **77** | 74 | PandaDealer agile-1 |
 | Minecraft-Player | 20 | **5** | **5** | HyperTensioN |
 | Minecraft-Regular | 59 | **54** | 49 | HyperTensioN |
 | Monroe-Fully-Observable | 20 | **20** | **20** | HyperTensioN, Lilotane |
-| Monroe-Partially-Observable | 20 | 17 | **19** | Lilotane |
+| Monroe-Partially-Observable | 20 | 18 | **19** | Lilotane |
 | Multiarm-Blocksworld | 74 | **74** | **74** | PandaDealer agile-1, PandaDealer agile-lama |
 | Robot | 20 | **20** | **20** | Linear-Complex, Linear-Simple, PANDA lamda, PANDA ppro,... |
-| Rover-GTOHP | 30 | **30** | 27 | HyperTensioN |
+| Rover-GTOHP | 30 | **29** | 27 | HyperTensioN |
 | Satellite-GTOHP | 20 | **20** | 16 | HyperTensioN |
 | SharpSAT | 21 | **17** | 11 | HyperTensioN |
 | Snake | 27 | **5** | 3 | Linear-Complex, PandaDealer agile-1, PandaDealer agile-... |
@@ -55,7 +55,7 @@ By domain at 30 s, against the best of the other configurations in each domain (
 
 | Planner | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 147 | 193 | 251 |
+| **Klimax** | 144 | 189 | 251 |
 | Linear-Simple | 128 | 161 | 207 |
 | Linear-Complex | 123 | 162 | 204 |
 | PANDA ppro | 101 | 118 | 156 |
@@ -87,8 +87,8 @@ shortest plan that any planner found divided by the length of its own; the sum o
 
 | | Klimax | Best other |
 |---|---|---|
-| Total order | 569.6 | 475.0 (PandaDealer agile-lama) |
-| Partial order | 245.2 | 196.2 (Linear-Simple) |
+| Total order | 573.8 | 475.0 (PandaDealer agile-lama) |
+| Partial order | 245.3 | 196.2 (Linear-Simple) |
 
 The search of the ground problem gives plans close to the shortest ones. The search that does
 not ground gives long ones where it has to explore (Lamps, Satellite, Rover, Barman): after its
@@ -124,6 +124,31 @@ in Monroe (35 against 12), Ultralight-Cockpit (29 against 25) and Transport (4 a
 PANDA in Satellite (23 against 21) and Woodworking (10 against 7). The search keeps every node
 in memory and stops at its limit in Colouring, Rover and Transport.
 
+## Numbers
+
+The numeric HTN benchmark of Quenard et al. ([HTN-Numerical-Benchmarks](https://github.com/gaspard-quenard/HTN-Numerical-Benchmarks)):
+seven families of 20 problems with numeric fluents. Klimax at 30 s per problem, one core:
+
+| Family | Solved |
+|---|---|
+| Alchemy | 20 |
+| Backpack | 18 |
+| Gripper_colors | 16 |
+| Minecraft | 20 |
+| Overcooked | 19 |
+| Transport_fuel | 6 |
+| Transvasement | 20 |
+| **Total** | **119 of 140** |
+
+The paper that presents the benchmark (Quenard et al., HPlan 2026) reports 91 for its planner
+SibylSmt, 48 for Aries and 42 for SIADEX, with 10 minutes per problem on another machine: those
+figures are theirs, not measured here.
+
+No other verifier reads hierarchical plans with numbers: these plans are checked by Klimax's
+own, which is independent of its searches. In Transport_fuel the plan depends on where the
+truck fills up, which the heuristics do not see; one of its methods leaves its subtasks without
+an order, so by the semantics of HDDL it is a partially ordered domain.
+
 ## Notes
 
 - The Klimax rows come from one run at 30 s per track, as those of the baseline do, on the same
@@ -136,8 +161,9 @@ in memory and stops at its limit in Colouring, Rover and Transport.
     actions undo less of the goal: Blocksworld-GTOHP goes from 23 to 30 with that.
   - The third one solves the domains whose methods leave many parameters free and where only
     the goal tells which values were right (Woodworking: 30 against 16 without it; Monroe,
-    partially observable: 17 against 8).
-  - The share costs the first one problems that it solved near the limit (Logistics).
+    partially observable: 18 against 8).
+  - The search by satisfiability gives up most of its part when it is not the way: where it
+    is, the plan comes within a dozen layers and a few hundred conflicts.
 - A partially ordered problem is searched over the ground problem and by satisfiability, which
   takes each task network in one of the orders it allows (Woodworking: 30 against 16).
 - Klimax answers "unsolvable" on 8 total-order problems of Minecraft-Player: the grounding proves

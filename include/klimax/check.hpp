@@ -124,8 +124,8 @@ struct VerifyResult
  * @brief Verifies a hierarchical plan in the format of the IPC HTN tracks: the primitive
  * sequence and its decomposition tree, between "==>" and "<==".
  *
- * Independent of the planner. Sequential plans without numbers; anything else is reported as
- * unsupported in `reason`, never accepted.
+ * Independent of the planner. Sequential plans, with numeric fluents; anything else is reported
+ * as unsupported in `reason`, never accepted.
  */
 KLIMAX_API VerifyResult verify(
   std::string_view domain, std::string_view problem, std::string_view plan,

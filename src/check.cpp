@@ -53,12 +53,11 @@ constexpr double kLiftedPiece = 0.005;
 constexpr double kEarly = 1.0;
 constexpr double kLiftedShare[2] = {0.25, 0.2};
 constexpr double kSatShare[2] = {0.0, 0.5};
-
-// The seconds that a search with those parts is due when `elapsed` have passed
-double due(const double share[2], double elapsed)
-{
-  return share[0] * std::min(elapsed, kEarly) + share[1] * std::max(0.0, elapsed - kEarly);
-}
+// Where satisfiability is the way, the solver has few conflicts (hundreds) and the plan comes
+// within a dozen layers: past these, its part of the time is this one
+constexpr uint64_t kSatHard = 1500;
+constexpr size_t kSatDeep = 12;
+constexpr double kSatHardShare = 0.1;
 
 void append(
   std::vector<Diagnostic> & out, const std::vector<kairos::Diagnostic> & in,
@@ -332,7 +331,7 @@ SolveResult solve(
   // cannot be grounded in time
   search::Result found;
   search::LiftedSearch lifted(model.value());
-  bool lifted_ended = !model->total_order;
+  bool lifted_ended = false;
   bool answered = false;
   double lifted_seconds = 0.0;
   uint64_t lifted_expansions = 0;
@@ -363,7 +362,9 @@ SolveResult solve(
     };
   // For measuring: the search by satisfiability alone
   const bool only_sat = std::getenv("KLIMAX_SAT") != nullptr;
-  const bool sharing = !lifted_ended && !options.anytime && !only_sat;
+  // With partial order the search that does not ground is kept for when the others give no
+  // answer: it takes one order of each network, and its plans are longer than theirs
+  const bool sharing = model->total_order && !options.anytime && !only_sat;
   if (sharing && std::getenv("KLIMAX_NOT_GROUNDED") != nullptr) {
     run_lifted(deadline);  // for measuring: that search alone
     if (!answered) {
@@ -386,6 +387,11 @@ SolveResult solve(
     std::optional<search::SatSearch> by_sat;  // once the problem is grounded
     bool sat_ended = false;
     double sat_seconds = 0.0;
+    uint64_t sat_conflicts = 0;
+    // The seconds each of the two is due, added up as the time passes
+    double lifted_due = lifted_seconds;
+    double sat_due = 0.0;
+    double accounted = seconds_since(start);
     auto run_sat = [&](std::optional<Clock::time_point> until) {
         const Clock::time_point from = Clock::now();
         kairos::BudgetConfig limits;
@@ -399,6 +405,7 @@ SolveResult solve(
           r.outcome = search::Outcome::Unsupported;
         }
         sat_seconds += seconds_since(from);
+        sat_conflicts = r.expansions;
         sat_ended = r.outcome != search::Outcome::OutOfBudget || !r.message.empty();
         if (r.outcome == search::Outcome::Solved) {
           found = std::move(r);
@@ -406,14 +413,22 @@ SolveResult solve(
         }
       };
     config.clock = [&]() {
+        const double elapsed = seconds_since(start);
+        const double passed = elapsed - accounted;
+        accounted = elapsed;
+        const int late = elapsed < kEarly ? 0 : 1;
         if (sharing && !lifted_ended && !answered) {
-          const double more = due(kLiftedShare, seconds_since(start)) - lifted_seconds;
+          lifted_due += kLiftedShare[late] * passed;
+          const double more = lifted_due - lifted_seconds;
           if (more >= kLiftedPiece) {
             run_lifted(sooner(in(more)));
           }
         }
         if (by_sat && !sat_ended && !answered) {
-          const double more = due(kSatShare, seconds_since(start)) - sat_seconds;
+          const bool hard = sat_conflicts > kSatHard || by_sat->layers() > kSatDeep;
+          sat_due += (hard ? std::min(kSatHardShare, kSatShare[late]) :
+            kSatShare[late]) * passed;
+          const double more = sat_due - sat_seconds;
           if (more >= kLiftedPiece) {
             run_sat(sooner(in(more)));
           }
@@ -458,6 +473,7 @@ SolveResult solve(
         if (only_sat) {
           run_sat(deadline);
           grounded.outcome = search::Outcome::OutOfBudget;
+          grounded.expansions = sat_conflicts;
         } else {
           grounded = search::total_order(ground->value(), &*budget, how);
         }
@@ -471,7 +487,11 @@ SolveResult solve(
       }
     }
     // The search of the ground problem gave up: the other two take turns, each time longer
-    if (!answered && found.outcome == search::Outcome::OutOfBudget && !only_sat) {
+    // (or does not take the problem: numbers)
+    if (!answered && !only_sat && (found.outcome == search::Outcome::OutOfBudget ||
+      found.outcome == search::Outcome::Unsupported))
+    {
+      const search::Result refused = found;
       auto over = [&]() {return deadline && Clock::now() >= *deadline;};
       for (double piece = 0.05; !answered && !over() &&
         (!lifted_ended || (by_sat && !sat_ended)); piece *= 2.0)
@@ -481,6 +501,14 @@ SolveResult solve(
         }
         if (by_sat && !sat_ended && !answered) {
           run_sat(sooner(in(piece)));
+        }
+      }
+      if (!answered && refused.outcome == search::Outcome::Unsupported) {
+        // Nobody answered: out of time if the others could go on, not supported if they
+        // could not either
+        found = refused;
+        if (over()) {
+          found.outcome = search::Outcome::OutOfBudget;
         }
       }
     }

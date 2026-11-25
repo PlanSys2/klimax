@@ -251,11 +251,15 @@ TEST(LiftedTest, ShorterPlansAfterTheFirst)
   EXPECT_GT(s.result.steps, 4u);
 }
 
-TEST(LiftedTest, TotalOrderOnly)
+TEST(LiftedTest, PartialOrderInOneOrder)
 {
   Solved s = solve("(:htn :subtasks (and (bring cup a) (bring book d)))");
-  EXPECT_EQ(s.result.outcome, Outcome::Unsupported);
-  EXPECT_NE(s.result.message.find("totally ordered"), std::string::npos);
+  ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
+  EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
+  // No plan in the order taken is not a proof that there is none
+  s = solve("(:htn :subtasks (and (fly r1 c) (fly r2 c)))");
+  EXPECT_EQ(s.result.outcome, Outcome::OutOfBudget);
+  EXPECT_FALSE(s.result.message.empty());
 }
 
 }  // namespace

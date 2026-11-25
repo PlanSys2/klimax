@@ -30,11 +30,11 @@ It is developed within the [PlanSys2](https://github.com/PlanSys2) organization,
 Datalog engine). It does not depend on ROS.
 
 > **Status**: in development, no release yet. Klimax plans HDDL 1.0 problems (total and partial
-> order). Numbers and time, the extensions of HDDL 2.1, are the next phases of the
-> [roadmap](docs/roadmap.md).
+> order) and those with the numeric fluents of HDDL 2.1. Time, the other extension of HDDL 2.1,
+> is the next phase of the [roadmap](docs/roadmap.md).
 
 **How it compares**: on the benchmark of the HTN tracks of IPC 2023, with every plan checked by
-the IPC verifier and the same limits for all, Klimax solves 620 of the 761 total-order problems
+the IPC verifier and the same limits for all, Klimax solves 626 of the 761 total-order problems
 in 30 s (the best of the other thirteen configurations measured, 494) and 251 of the 283
 partial-order ones (the best of the other seven, 207). Results by domain, where it is behind and
 the method in [docs/results.md](docs/results.md) and [docs/baseline.md](docs/baseline.md).

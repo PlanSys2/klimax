@@ -848,20 +848,29 @@ private:
     }
     Env env;
     for (const ast::InitItem & item : m_.problem.init) {
-      if (item.kind != ast::InitItem::Kind::Fact) {
-        // Costs do not change which plans are valid
-        if (std::string_view(m_.problem.symbols.name(item.name)) == "total-cost" ||
-          !function_changes(item.name))
-        {
-          continue;
-        }
-        invalid("unsupported: numeric fluents");
-      }
       if (item.time || item.negated) {
         invalid("unsupported: timed initial literals");
       }
+      if (item.kind != ast::InitItem::Kind::Fact) {
+        // Costs do not change which plans are valid
+        if (std::string_view(m_.problem.symbols.name(item.name)) == "total-cost") {
+          continue;
+        }
+        Atom fluent{problem_.function(item.name)};
+        for (ast::TermId t : item.args) {
+          fluent.push_back(problem_.object(t, env));
+        }
+        const std::optional<double> value = problem_.number(item.value, env);
+        if (!value) {
+          invalid("unsupported: this initial value");
+        }
+        values_[std::move(fluent)] = *value;
+        continue;
+      }
       state_.insert(problem_.atom(item.name, item.args, env));
     }
+    domain_.numbers(&values_);
+    problem_.numbers(&values_);
     for (uint32_t e = 0; e < events_.size(); ++e) {
       if (events_[e].pending == 0 && !events_[e].placed && !is_leaf_[e] &&
         events_[e].node == kNone)
@@ -886,12 +895,19 @@ private:
       if (a.effect.valid()) {
         std::vector<Atom> adds;
         std::vector<Atom> deletes;
-        domain_.effect(a.effect, state_, env, adds, deletes);
+        std::vector<Change> changes;
+        domain_.effect(a.effect, state_, env, adds, deletes, &changes);
         for (const Atom & d : deletes) {
           state_.erase(d);
         }
         for (Atom & add : adds) {
           state_.insert(std::move(add));
+        }
+        for (Change & change : changes) {
+          if (change.value != change.value) {
+            invalid("step " + show(n) + " is not applicable: it reads a number with no value");
+          }
+          values_[std::move(change.fluent)] = change.value;
         }
       }
       place(n.start);
@@ -911,12 +927,6 @@ private:
         invalid("the goal does not hold at the end of the plan");
       }
     }
-  }
-
-  bool function_changes(Symbol name) const
-  {
-    auto f = m_.domain.functions.find(m_.problem.symbols.name(name));
-    return !f || m_.domain.functions.items[*f].changes;
   }
 
   // Why an event cannot take place yet, for the message
@@ -950,6 +960,7 @@ private:
   std::vector<uint32_t> waiting_;   // tests whose predecessors are placed
   size_t placed_ = 0;
   State state_;
+  Values values_;  // of the numeric fluents
 };
 
 }  // namespace

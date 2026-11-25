@@ -76,6 +76,8 @@ public:
     return last_;
   }
 
+  size_t layers() const {return layers_.empty() ? 0 : layers_.size() - 1;}
+
 private:
   // False when the budget ran out: the next call goes on from there
   bool search(Result & result)
@@ -785,6 +787,8 @@ SatSearch::SatSearch(const tdg::Problem & problem)
 SatSearch::~SatSearch() = default;
 
 Result SatSearch::run(kairos::Budget * budget) {return impl_->run(budget);}
+
+size_t SatSearch::layers() const {return impl_->layers();}
 
 Result sat(const tdg::Problem & problem, kairos::Budget * budget)
 {

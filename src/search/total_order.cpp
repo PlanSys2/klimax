@@ -17,11 +17,14 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <iterator>
 #include <memory>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -451,10 +454,12 @@ public:
     // allows (as written, where the constraints leave it open). A plan found so is a plan of
     // the problem; not finding one proves nothing, since another order might do.
     linearized_ = !m_.total_order;
-    if (!g_.axioms.empty() || !g_.numeric_fluents.empty() || !g_.object_fluents.empty() ||
-      !g_.durative_actions.empty())
-    {
-      result.message = "derived predicates, numbers or durative actions";
+    if (!g_.axioms.empty() || !g_.object_fluents.empty() || !g_.durative_actions.empty()) {
+      result.message = "derived predicates, object fluents or durative actions";
+      return result;
+    }
+    if (!numbers_supported()) {
+      result.message = "numeric expressions other than sums, products and quotients";
       return result;
     }
     const auto t0 = std::chrono::steady_clock::now();
@@ -658,6 +663,7 @@ private:
     cut_ = false;
     initial_state();
     trail_.clear();
+    numeric_trail_.clear();
     cells_.clear();
     executed_.clear();
     choices_.clear();
@@ -689,7 +695,7 @@ private:
         // An action: applicable through any of its instances (they differ in the precondition)
         const ground::Action * action = nullptr;
         for (uint32_t a : task.actions) {
-          if (holds(g_.actions[a].precondition)) {
+          if (can(g_.actions[a])) {
             action = &g_.actions[a];
             break;
           }
@@ -1356,11 +1362,159 @@ private:
       h = (h ^ (bits_[i] & m[i])) * 0x9e3779b97f4a7c15ull;
       h ^= h >> 29;
     }
-    return h;
+    return h ^ numeric_hash_;
   }
 
+  // --- Numbers ---------------------------------------------------------------------------------
+  // The value of each numeric fluent is part of the state: not a number while it has none. The
+  // relaxations ignore numeric conditions, which only makes them more optimistic.
+
+  static uint64_t value_hash(uint32_t fluent, double value)
+  {
+    uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    uint64_t x = ((uint64_t{fluent} + 1) * 0x9e3779b97f4a7c15ull) ^ bits;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdull;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ull;
+    return x ^ (x >> 33);
+  }
+
+  static bool supported(const ground::Expr & e)
+  {
+    switch (e.op) {
+      case ground::ExprOp::Constant:
+      case ground::ExprOp::Fluent:
+        return true;
+      case ground::ExprOp::Add:
+      case ground::ExprOp::Sub:
+      case ground::ExprOp::Mul:
+      case ground::ExprOp::Div:
+      case ground::ExprOp::Neg:
+        return std::all_of(e.children.begin(), e.children.end(),
+                 [](const ground::Expr & c) {return supported(c);});
+      default:
+        return false;
+    }
+  }
+
+  static bool supported(const ground::Condition & c)
+  {
+    return std::all_of(c.numeric.begin(), c.numeric.end(),
+             [](const ground::NumericCondition & n) {return supported(n.lhs) && supported(n.rhs);});
+  }
+
+  bool numbers_supported() const
+  {
+    if (!supported(g_.goal)) {
+      return false;
+    }
+    for (const ground::Action & a : g_.actions) {
+      if (!supported(a.precondition)) {
+        return false;
+      }
+      for (const ground::Effect & e : a.effects) {
+        if (e.kind == ground::Effect::Kind::ObjectAssign || !supported(e.condition) ||
+          (e.kind == ground::Effect::Kind::Numeric && (!supported(e.value) || e.continuous)))
+        {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Not a number if it reads a fluent with no value or divides by zero
+  double number(const ground::Expr & e) const
+  {
+    constexpr double none = std::numeric_limits<double>::quiet_NaN();
+    switch (e.op) {
+      case ground::ExprOp::Constant:
+        return e.value;
+      case ground::ExprOp::Fluent:
+        return values_[e.fluent];
+      case ground::ExprOp::Add: {
+          double total = 0.0;
+          for (const ground::Expr & c : e.children) {
+            total += number(c);
+          }
+          return total;
+        }
+      case ground::ExprOp::Mul: {
+          double total = 1.0;
+          for (const ground::Expr & c : e.children) {
+            total *= number(c);
+          }
+          return total;
+        }
+      case ground::ExprOp::Sub:
+        return number(e.children.at(0)) - number(e.children.at(1));
+      case ground::ExprOp::Div: {
+          const double by = number(e.children.at(1));
+          return by == 0.0 ? none : number(e.children.at(0)) / by;
+        }
+      case ground::ExprOp::Neg:
+        return -number(e.children.at(0));
+      default:
+        return none;
+    }
+  }
+
+  // What a numeric effect leaves in its fluent, read in the current state
+  double after(const ground::Effect & e) const
+  {
+    const double by = number(e.value);
+    const double old = values_[e.fluent];
+    switch (e.op) {
+      case kairos::ast::AssignOp::Assign: return by;
+      case kairos::ast::AssignOp::Increase: return old + by;
+      case kairos::ast::AssignOp::Decrease: return old - by;
+      case kairos::ast::AssignOp::ScaleUp: return old * by;
+      default: return by == 0.0 ? std::numeric_limits<double>::quiet_NaN() : old / by;
+    }
+  }
+
+  // The action is applicable: its precondition holds and its numeric effects have a value
+  bool can(const ground::Action & action) const
+  {
+    if (!holds(action.precondition)) {
+      return false;
+    }
+    for (const ground::Effect & e : action.effects) {
+      if (e.kind == ground::Effect::Kind::Numeric && holds(e.condition) &&
+        !std::isfinite(after(e)))
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void set_value(uint32_t fluent, double value)
+  {
+    const double old = values_[fluent];
+    if (old == value || (old != old && value != value)) {
+      return;
+    }
+    const uint64_t change = value_hash(fluent, old) ^ value_hash(fluent, value);
+    state_hash_ ^= change;
+    numeric_hash_ ^= change;
+    numeric_trail_.emplace_back(fluent, old);
+    trail_.push_back(kNumericMark);
+    values_[fluent] = value;
+  }
+
+  // Undoes one entry of trail_; the caller puts state_hash_ back
   void flip(ground::AtomId a)
   {
+    if (a == kNumericMark) {
+      const auto [fluent, old] = numeric_trail_.back();
+      numeric_trail_.pop_back();
+      numeric_hash_ ^= value_hash(fluent, values_[fluent]) ^ value_hash(fluent, old);
+      values_[fluent] = old;
+      return;
+    }
     state_[a] = !state_[a];
     bits_[a / 64] ^= uint64_t{1} << (a % 64);
   }
@@ -1375,6 +1529,16 @@ private:
       bits_[a / 64] |= uint64_t{1} << (a % 64);
       state_hash_ ^= zobrist_[a];
     }
+    values_.assign(g_.numeric_fluents.size(), std::numeric_limits<double>::quiet_NaN());
+    numeric_hash_ = 0;
+    numeric_trail_.clear();
+    for (uint32_t f = 0; f < values_.size(); ++f) {
+      if (f < g_.init_numeric.size() && g_.init_numeric[f]) {
+        values_[f] = *g_.init_numeric[f];
+      }
+      numeric_hash_ ^= value_hash(f, values_[f]);
+    }
+    state_hash_ ^= numeric_hash_;
   }
 
   // The steps of each network in the order to execute them
@@ -1422,6 +1586,17 @@ private:
         return false;
       }
     }
+    for (const ground::NumericCondition & n : c.numeric) {
+      // A comparison with something that has no value does not hold
+      const double l = number(n.lhs);
+      const double r = number(n.rhs);
+      const bool ok = n.op == ground::CompareOp::Eq ? l == r : n.op == ground::CompareOp::Lt ?
+        l < r : n.op == ground::CompareOp::Le ? l <= r : n.op == ground::CompareOp::Gt ? l > r :
+        l >= r;
+      if (!ok) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -1437,9 +1612,13 @@ private:
 
   void apply(const ground::Action & action)
   {
-    // Conditional effects read the state before the action
+    // Conditional and numeric effects read the state before the action
     std::vector<std::pair<ground::AtomId, bool>> later;
+    std::vector<std::pair<uint32_t, double>> numbers;
     for (const ground::Effect & e : action.effects) {
+      if (e.kind == ground::Effect::Kind::Numeric && holds(e.condition)) {
+        numbers.emplace_back(e.fluent, after(e));
+      }
       if ((e.kind == ground::Effect::Kind::Add || e.kind == ground::Effect::Kind::Delete) &&
         holds(e.condition))
       {
@@ -1461,6 +1640,9 @@ private:
       if (value) {
         set(a, true);
       }
+    }
+    for (const auto & [fluent, value] : numbers) {
+      set_value(fluent, value);
     }
   }
 
@@ -1540,7 +1722,7 @@ private:
     for (uint32_t m : task == kNone ? initial_ : methods_[task]) {
       const tdg::Method & method = p_.methods[m];
       if (method.has_precondition && std::none_of(method.precondition.begin(),
-        method.precondition.end(), [&](uint32_t a) {return holds(g_.actions[a].precondition);}))
+        method.precondition.end(), [&](uint32_t a) {return can(g_.actions[a]);}))
       {
         continue;
       }
@@ -1549,6 +1731,17 @@ private:
       }
     }
     return out;
+  }
+
+  // The numbers of a state kept: every fluent, in order
+  void load_values(const std::vector<double> & kept, uint32_t index)
+  {
+    const size_t n = values_.size();
+    numeric_hash_ = 0;
+    for (size_t f = 0; f < n; ++f) {
+      values_[f] = kept[size_t{index} * n + f];
+      numeric_hash_ ^= value_hash(static_cast<uint32_t>(f), values_[f]);
+    }
   }
 
   void bf_store()
@@ -1562,6 +1755,7 @@ private:
       }
     }
     bf_->hashes.push_back(state_hash_);
+    bf_->values.insert(bf_->values.end(), values_.begin(), values_.end());
   }
 
   void bf_load(uint32_t index)
@@ -1573,6 +1767,7 @@ private:
     }
     std::copy_n(bf_->states.begin() + static_cast<std::ptrdiff_t>(at), words, bits_.begin());
     state_hash_ = bf_->hashes[index];
+    load_values(bf_->values, index);
   }
 
   // The relaxed costs from the current state, unless they are the ones already computed
@@ -1614,7 +1809,7 @@ private:
           }
           const ground::Action * action = nullptr;
           for (uint32_t a : first.actions) {
-            if (holds(g_.actions[a].precondition)) {
+            if (can(g_.actions[a])) {
               action = &g_.actions[a];
               break;
             }
@@ -1745,7 +1940,7 @@ private:
         while (top != kNone && !p_.tasks[bf_->cells[top].task].actions.empty()) {
           const ground::Action * action = nullptr;
           for (uint32_t a : p_.tasks[bf_->cells[top].task].actions) {
-            if (holds(g_.actions[a].precondition)) {
+            if (can(g_.actions[a])) {
               action = &g_.actions[a];
               break;
             }
@@ -1783,6 +1978,7 @@ private:
         ++work_;
       }
       trail_.clear();
+      numeric_trail_.clear();
       if (dead) {
         bf_->exec.resize(exec_start);
         continue;
@@ -1970,6 +2166,7 @@ private:
       initial_state();
       po_states_.clear();
       po_hashes_.clear();
+      po_values_.clear();
       po_store();
       // One node per way of instantiating the initial network
       PoNode empty;
@@ -2067,7 +2264,7 @@ private:
         if (!task.actions.empty()) {
           const ground::Action * action = nullptr;
           for (uint32_t a : task.actions) {
-            if (holds(g_.actions[a].precondition)) {
+            if (can(g_.actions[a])) {
               action = &g_.actions[a];
               break;
             }
@@ -2104,7 +2301,7 @@ private:
           const tdg::Method & method = p_.methods[m];
           if (method.has_precondition && std::none_of(method.precondition.begin(),
             method.precondition.end(),
-            [&](uint32_t a) {return holds(g_.actions[a].precondition);}))
+            [&](uint32_t a) {return can(g_.actions[a]);}))
           {
             continue;
           }
@@ -2168,6 +2365,7 @@ private:
       }
     }
     po_hashes_.push_back(state_hash_);
+    po_values_.insert(po_values_.end(), values_.begin(), values_.end());
   }
 
   void po_load(uint32_t index)
@@ -2179,6 +2377,7 @@ private:
     }
     std::copy_n(po_states_.begin() + static_cast<std::ptrdiff_t>(at), words, bits_.begin());
     state_hash_ = po_hashes_[index];
+    load_values(po_values_, index);
   }
 
   std::string po_plan(uint32_t goal) const
@@ -2250,7 +2449,7 @@ private:
     for (uint32_t m : methods) {
       const tdg::Method & method = p_.methods[m];
       if (method.has_precondition && std::none_of(method.precondition.begin(),
-        method.precondition.end(), [&](uint32_t a) {return holds(g_.actions[a].precondition);}))
+        method.precondition.end(), [&](uint32_t a) {return can(g_.actions[a]);}))
       {
         continue;
       }
@@ -2287,7 +2486,7 @@ private:
           }
           const ground::Action * action = nullptr;
           for (uint32_t a : first.actions) {
-            if (holds(g_.actions[a].precondition)) {
+            if (can(g_.actions[a])) {
               action = &g_.actions[a];
               break;
             }
@@ -2533,7 +2732,11 @@ private:
   std::vector<bool> state_;
   std::vector<uint64_t> zobrist_;
   uint64_t state_hash_ = 0;
-  std::vector<ground::AtomId> trail_;   // atoms flipped, to undo
+  std::vector<ground::AtomId> trail_;   // atoms flipped (or kNumericMark), to undo
+  static constexpr ground::AtomId kNumericMark = 0xfffffffeu;
+  std::vector<double> values_;          // of the numeric fluents; not a number: none
+  uint64_t numeric_hash_ = 0;           // their part of state_hash_
+  std::vector<std::pair<uint32_t, double>> numeric_trail_;  // fluent and old value, to undo
   std::vector<Cell> cells_;
   std::vector<Node> nodes_;             // 0 is the root above the initial tasks
   std::vector<uint32_t> executed_;      // nodes of the actions, in plan order
@@ -2599,6 +2802,7 @@ private:
     std::vector<BfEvent> exec;
     std::vector<uint64_t> states;
     std::vector<uint64_t> hashes;
+    std::vector<double> values;  // of the numeric fluents, by state
     std::vector<std::pair<uint64_t, uint32_t>> open;
     std::unordered_set<uint64_t> seen;
     bool over = false;  // out of room
@@ -2607,6 +2811,7 @@ private:
   std::vector<PoNode> po_nodes_;
   std::vector<PoItem> po_items_;
   std::vector<std::pair<uint32_t, uint32_t>> po_edges_;
+  std::vector<double> po_values_;                     // the numbers of each state kept
   std::vector<uint64_t> po_states_;
   std::vector<uint64_t> po_hashes_;
   std::vector<std::pair<uint64_t, uint32_t>> po_open_;

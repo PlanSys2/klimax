@@ -83,28 +83,30 @@ By domain at 30 s, against the best of the other configurations in each domain (
 ## Optimal: the shortest plan, proved
 
 Klimax with `--anytime` counts when it proves that no plan has fewer actions. Against the
-optimal recipes of IPC 2023 that need no LP solver, one run at 30 s per track (a slower run
-than those of the tables above, for the three planners alike: see the notes):
+optimal recipes of IPC 2023 that need no LP solver, one run at 30 s per track, on the same cores
+as the tables above:
 
 | Total order (761) | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 143 | 213 | 300 |
-| PandaDealer optimal | 48 | 109 | 180 |
-| PANDA optimal (`rc2(lmc)`) | 39 | 103 | 177 |
+| **Klimax** | 163 | 239 | 319 |
+| PandaDealer optimal | 79 | 128 | 206 |
+| PANDA optimal (`rc2(lmc)`) | 57 | 118 | 192 |
 
 | Partial order (283) | 100 ms | 1 s | 30 s |
 |---|---|---|---|
-| **Klimax** | 68 | 86 | 104 |
-| PANDA optimal (`rc2(lmc)`) | 66 | 91 | 114 |
+| **Klimax** | 77 | 93 | 108 |
+| PANDA optimal (`rc2(lmc)`) | 73 | 95 | 119 |
 
-Where Klimax and another planner both prove a plan the shortest, the lengths agree: in 185 of
-185 total-order problems and in 98 of 98 partial-order ones.
+Where Klimax and another planner both prove a plan the shortest, the lengths agree: in 210 of
+210 total-order problems and in 101 of 101 partial-order ones.
 
-In total order Klimax proves at least as many as the others in every domain but Woodworking
-(15 against 16); the widest gaps are Minecraft-Regular (50 against 18), Monroe-Fully-Observable
-(20 against 3) and Satellite (20 against 4). In partial order the proof needs the search that
-interleaves subtasks, which keeps every node in memory: it stops at its limit in Colouring,
-Rover and Transport, and PANDA proves more in Colouring, Woodworking, Satellite and Monroe.
+In total order Klimax proves at least as many as the others in every domain; the widest gaps
+are Minecraft-Regular (52 against 23), Hiking (16 against 1), Satellite (20 against 5),
+Transport (16 against 6) and Monroe-Fully-Observable (20 against 11). In partial order the
+proof needs the search that interleaves subtasks, which keeps every node in memory: it stops at
+its limit in Colouring, Rover and Transport. Klimax proves more in Ultralight-Cockpit (29
+against 25) and Transport (6 against 3), PANDA in Monroe (12 against none), Satellite (23
+against 20) and Woodworking (10 against 7).
 
 ## Notes
 
@@ -112,12 +114,6 @@ Rover and Transport, and PANDA proves more in Colouring, Woodworking, Satellite 
   cores. The SharpSAT row comes from a later run of that domain: the verifier of Klimax gave up
   on one of its plans (too many values for the variables of the initial task network), which
   the IPC verifier accepts.
-- The runs of the optimal section were made with the power profile of the machine in `balanced`,
-  which on this machine halves the speed of a core after half a second of load: every problem
-  took about 2.2 times as long as in the other runs. The three planners ran interleaved under
-  the same conditions, so the comparison holds, but all their figures are lower than they would
-  be at full speed (a run of Klimax at 1 s at full speed proves 240 total-order problems, against
-  the 213 of the 1 s column). To be measured again.
 - Klimax answers "unsolvable" on 9 total-order problems of Minecraft-Player: the grounding proves
   that the initial tasks cannot be decomposed into reachable actions. No planner of the baseline
   solves them. They count as not solved in the tables.

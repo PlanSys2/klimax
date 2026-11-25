@@ -19,7 +19,9 @@
 #include <chrono>
 #include <map>
 #include <new>
+#include <optional>
 #include <sstream>
+#include <stop_token>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -29,6 +31,7 @@
 #include "hddl/parser.hpp"
 #include "kairos/diagnostics.hpp"
 #include "pddl/lexer.hpp"
+#include "search/lifted.hpp"
 #include "search/total_order.hpp"
 #include "tdg/grounder.hpp"
 #include "verify/verifier.hpp"
@@ -38,6 +41,13 @@ namespace klimax
 
 namespace
 {
+
+// The search that does not ground: seconds before grounding, then its part of the time passed
+// and the least it runs at once
+constexpr double kLiftedFirst = 0.03;
+constexpr double kLiftedShare = 0.25;
+constexpr double kLiftedPiece = 0.005;
+
 
 void append(
   std::vector<Diagnostic> & out, const std::vector<kairos::Diagnostic> & in,
@@ -292,44 +302,116 @@ SolveResult solve(
     result.message = "a problem without :htn is a PDDL problem: use Kairos";
     return result;
   }
-  kairos::BudgetConfig config;
+  using Clock = kairos::BudgetConfig::Clock;
+  auto seconds_since = [&](Clock::time_point t) {
+      return std::chrono::duration<double>(Clock::now() - t).count();
+    };
+  auto since = [&]() {return 1000.0 * seconds_since(start);};
+  std::optional<Clock::time_point> deadline;
   if (options.seconds > 0.0) {
-    config.deadline = start + std::chrono::duration_cast<kairos::BudgetConfig::Clock::duration>(
+    deadline = start + std::chrono::duration_cast<Clock::duration>(
       std::chrono::duration<double>(options.seconds));
   }
-  kairos::Budget budget(config);
-  auto ground = tdg::ground(model.value(), &budget);
-  auto since = [&]() {
-      return std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - start).count();
-    };
-  result.ground_ms = since();
-  if (!ground.ok()) {
-    const bool budget_out = !ground.diagnostics().empty() &&
-      ground.diagnostics()[0].code == "ground.budget";
-    if (!budget_out) {
-      append(result.diagnostics, ground.diagnostics(), "");
-    }
-    result.status = budget_out ? Status::Timeout : Status::Unsupported;
-    result.message = budget_out ? "" : "the problem cannot be grounded";
-    return result;
-  }
+  // Two ways of searching share the time. The one that does not ground goes first for a
+  // moment: when it finds a plan it does so at once in most problems. Then the problem is
+  // grounded and searched, and the first one goes on in between, in pieces, for kLiftedShare of
+  // the time passed; it has the rest if the other gives up. Looking for the shortest plan needs
+  // the ground problem: the first one runs then only if the problem cannot be grounded in time
   search::Result found;
-  try {
-    search::Options how;
-    how.anytime = options.anytime;
-    if (options.on_plan) {
-      how.on_plan = [&](const std::string & plan, size_t steps) {
-          // Only plans that the verifier accepts leave the library
-          if (!options.verify || verifier::verify(model.value(), plan).valid) {
-            options.on_plan(with_original_names(plan, spelling_of(domain, problem)), steps);
+  search::LiftedSearch lifted(model.value());
+  bool lifted_ended = !model->total_order;
+  bool answered = false;
+  double lifted_seconds = 0.0;
+  auto run_lifted = [&](std::optional<Clock::time_point> until) {
+      const Clock::time_point from = Clock::now();
+      kairos::BudgetConfig limits;
+      limits.deadline = until;
+      limits.check_period = std::chrono::microseconds(1000);
+      kairos::Budget budget(limits);
+      search::Result r;
+      try {
+        r = lifted.run(&budget);
+      } catch (const std::bad_alloc &) {
+        r.outcome = search::Outcome::Unsupported;
+      }
+      lifted_seconds += seconds_since(from);
+      lifted_ended = r.outcome != search::Outcome::OutOfBudget || !r.message.empty();
+      if (r.outcome == search::Outcome::Solved || r.outcome == search::Outcome::Unsolvable) {
+        found = std::move(r);
+        answered = true;
+      }
+    };
+  auto sooner = [&](Clock::time_point t) {return deadline && *deadline < t ? *deadline : t;};
+  auto in = [](double seconds) {
+      return Clock::now() + std::chrono::duration_cast<Clock::duration>(
+        std::chrono::duration<double>(seconds));
+    };
+  const bool sharing = !lifted_ended && !options.anytime;
+  if (sharing) {
+    run_lifted(sooner(in(kLiftedFirst)));
+  }
+  const double lifted_ms = since();
+  if (!answered) {
+    // The budget of the ground problem asks for the time now and then: the other search takes
+    // its pieces there, and stops this one when it has the answer
+    std::stop_source stop;
+    kairos::BudgetConfig config;
+    config.stop = stop.get_token();
+    config.deadline = deadline ? *deadline : start + std::chrono::hours(24 * 365);
+    config.clock = [&]() {
+        if (sharing && !lifted_ended) {
+          const double due = kLiftedShare * seconds_since(start) - lifted_seconds;
+          if (due >= kLiftedPiece) {
+            run_lifted(sooner(in(due)));
+            if (answered) {
+              stop.request_stop();
+            }
           }
-        };
+        }
+        return Clock::now();
+      };
+    std::optional<kairos::Budget> budget(std::in_place, config);
+    auto ground = std::make_optional(tdg::ground(model.value(), &*budget));
+    result.ground_ms = since() - lifted_ms;
+    if (!answered && !ground->ok()) {
+      const bool budget_out = !ground->diagnostics().empty() &&
+        ground->diagnostics()[0].code == "ground.budget";
+      if (!budget_out) {
+        append(result.diagnostics, ground->diagnostics(), "");
+        result.status = Status::Unsupported;
+        result.message = "the problem cannot be grounded";
+        return result;
+      }
+      found = search::Result();
+      found.outcome = search::Outcome::OutOfBudget;
+    } else if (!answered) {
+      budget.emplace(config);
+      search::Result grounded;
+      try {
+        search::Options how;
+        how.anytime = options.anytime;
+        if (options.on_plan) {
+          how.on_plan = [&](const std::string & plan, size_t steps) {
+              // Only plans that the verifier accepts leave the library
+              if (!options.verify || verifier::verify(model.value(), plan).valid) {
+                options.on_plan(with_original_names(plan, spelling_of(domain, problem)), steps);
+              }
+            };
+        }
+        grounded = search::total_order(ground->value(), &*budget, how);
+      } catch (const std::bad_alloc &) {
+        grounded = search::Result();
+        grounded.outcome = search::Outcome::OutOfBudget;
+        grounded.message = "out of memory";
+      }
+      if (!answered) {
+        found = std::move(grounded);
+      }
     }
-    found = search::total_order(ground.value(), &budget, how);
-  } catch (const std::bad_alloc &) {
-    found.outcome = search::Outcome::OutOfBudget;
-    found.message = "out of memory";
+    if (!answered && found.outcome == search::Outcome::OutOfBudget && !lifted_ended) {
+      ground.reset();
+      run_lifted(deadline);
+    }
   }
   result.search_ms = since() - result.ground_ms;
   result.expansions = found.expansions;

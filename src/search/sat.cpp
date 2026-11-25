@@ -81,10 +81,6 @@ private:
   bool search(Result & result)
   {
     if (layers_.empty()) {
-      if (!m_.total_order) {
-        result.message = "the search by satisfiability takes totally ordered problems only";
-        return true;
-      }
       for (const ground::Action & a : g_.actions) {
         if (!a.effects.empty() || !plain(a.precondition)) {
           result.message = "the search by satisfiability takes no conditional effects or numbers";
@@ -108,16 +104,17 @@ private:
     }
     while (true) {
       if (all_ == kNone) {
-        if (budget_ != nullptr && budget_->exhausted()) {
-          result.outcome = Outcome::OutOfBudget;
-          return false;
-        }
-        if (layers_.size() > kLayers) {
+        if (making_ == 0 && layers_.size() > kLayers) {
           result.outcome = Outcome::OutOfBudget;
           result.message = "the search by satisfiability reached its last layer";
           return true;
         }
-        if (!expand()) {
+        const Made made = expand();
+        if (made == Made::Part) {
+          result.outcome = Outcome::OutOfBudget;
+          return false;
+        }
+        if (made == Made::Full) {
           result.outcome = Outcome::OutOfBudget;
           result.message = "the search by satisfiability ran out of its memory";
           return true;
@@ -425,12 +422,24 @@ private:
     }
   }
 
-  // The next layer from the last one; false if it does not fit
-  bool expand()
+  enum class Made : uint8_t {Whole, Part, Full};
+
+  // The next layer from the last one: its positions first, then its clauses. Part when the
+  // budget ran out (the next call goes on from there); Full if it does not fit
+  Made expand()
   {
-    const size_t from = layers_.size() - 1;
-    std::vector<Position> next;
-    for (size_t i = 0; i < layers_[from].size(); ++i) {
+    auto out = [&]() {return budget_ != nullptr && budget_->exhausted();};
+    if (making_ == 0) {
+      making_ = 1;
+      at_ = 0;
+      next_.clear();
+    }
+    std::vector<Position> & next = next_;
+    const size_t from = layers_.size() - (making_ == 1 ? 1 : 2);
+    for (size_t & i = at_; making_ == 1 && i < layers_[from].size(); ++i) {
+      if (out()) {
+        return Made::Part;
+      }
       Position & p = layers_[from][i];
       p.child = static_cast<uint32_t>(next.size());
       if (p.methods.empty()) {
@@ -498,13 +507,21 @@ private:
         next.push_back(std::move(q));
       }
       if (state_vars_ > kStateVars || s_.variables() > kVariables || s_.clauses() > kClauses) {
-        return false;
+        return Made::Full;
       }
     }
-    layers_.push_back(std::move(next));
-    const std::vector<Position> & parents = layers_[from];
+    if (making_ == 1) {
+      layers_.push_back(std::move(next));
+      next.clear();
+      making_ = 2;
+      at_ = 0;
+    }
+    const std::vector<Position> & parents = layers_[layers_.size() - 2];
     const std::vector<Position> & layer = layers_.back();
-    for (size_t i = 0; i < parents.size(); ++i) {
+    for (size_t & i = at_; i < parents.size(); ++i) {
+      if (out()) {
+        return Made::Part;
+      }
       const Position & p = parents[i];
       if (p.methods.empty()) {
         continue;
@@ -514,10 +531,11 @@ private:
       }
       between(p, layer);
       if (s_.clauses() > kClauses) {
-        return false;
+        return Made::Full;
       }
     }
-    return true;
+    making_ = 0;
+    return Made::Whole;
   }
 
   static uint32_t var_of(const std::vector<uint32_t> & keys, const std::vector<uint32_t> & vars,
@@ -745,6 +763,9 @@ private:
   bool trace_;
   bool finished_ = false;
   Result last_;
+  int making_ = 0;                           // of the next layer: 1 its positions, 2 its clauses
+  size_t at_ = 0;                            // the position to go on from
+  std::vector<Position> next_;               // the layer being made
   uint32_t all_ = kNone;                     // the variable of the layer to solve, if it is made
   sat::Solver s_;
   std::vector<std::vector<uint32_t>> order_;

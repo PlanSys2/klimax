@@ -24,7 +24,7 @@ in [baseline.md](baseline.md).
 - **Without grounding** (H4): a totally ordered problem is also searched as written, depth
   first, with the parameters that a method leaves free bound when a precondition needs them.
   The searches share the time.
-- **By satisfiability** (H4): a totally ordered problem is also searched as a formula, by layers
+- **By satisfiability** (H4): a problem is also searched as a formula, by layers
   of decomposition, with a SAT solver of its own. It is what solves the domains whose methods
   leave many parameters free (Woodworking, Monroe).
 - **Anytime and optimal** (H4): after the first plan Klimax looks for shorter ones and proves
@@ -41,7 +41,8 @@ in [baseline.md](baseline.md).
   of ground methods, and the sharing of the time costs the other searches problems that they
   solved near the limit. Encoding the problem as written, as Lilotane does, would make it
   smaller.
-- Domains where a planner of the baseline solves more: Blocksworld-GTOHP, Hiking, Logistics.
+- Domains where a planner of the baseline solves more: Hiking, Logistics, Monroe (partially
+  observable, total order), by one to three problems each.
 - An optimal search with an admissible heuristic. With partial order, a proof that does not
   keep every node in memory: it is what stops Klimax in Colouring, Rover and Transport, though
   it proves more plans the shortest than the planners of the baseline in both tracks.

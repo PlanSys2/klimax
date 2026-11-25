@@ -45,6 +45,10 @@ const char * kDomain =
   " (:task walk :parameters (?r - robot ?to - room))\n"
   " (:task pace :parameters (?r - robot))\n"
   " (:task hop :parameters (?r - robot))\n"
+  " (:task tidy :parameters (?i - item))\n"
+  " (:method tidy-take :parameters (?i - item ?l - room ?r - robot) :task (tidy ?i)\n"
+  "  :precondition (in ?i ?l) :ordered-subtasks (and (go ?r ?l) (pick ?r ?i ?l)))\n"
+  " (:method tidy-leave :parameters (?i - item) :task (tidy ?i))\n"
   " (:method pace-more :parameters (?r - robot ?x ?y - room) :task (pace ?r)\n"
   "  :precondition (and (at ?r ?x) (link ?x ?y))\n"
   "  :ordered-subtasks (and (move ?r ?x ?y) (move ?r ?y ?x) (pace ?r) (look ?r ?x)))\n"
@@ -178,8 +182,9 @@ TEST(LiftedTest, GoesOnAfterTheBudgetRanOut)
     const Solved s = solve(htn, goal, polls);
     ASSERT_EQ(s.result.outcome, Outcome::Solved) << polls;
     EXPECT_GT(s.pieces, 1) << polls;
-    EXPECT_EQ(s.result.plan, whole.result.plan) << polls;
-    EXPECT_EQ(s.result.expansions, whole.result.expansions) << polls;
+    EXPECT_TRUE(s.checked.valid) << polls << s.checked.reason;
+    // Looking for a shorter plan ends with the budget of the piece: not always the same one
+    EXPECT_GE(s.result.steps, whole.result.steps) << polls;
   }
   EXPECT_EQ(solve("(:htn :ordered-subtasks (and (go r1 c)))", "(:goal (seen a))", 2).result.outcome,
     Outcome::Unsolvable);
@@ -221,6 +226,29 @@ TEST(LiftedTest, WhatLaterActionsRequire)
   ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
   EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
   EXPECT_EQ(s.result.steps, 6u);
+}
+
+TEST(LiftedTest, MethodsThatUndoLessOfTheGoalFirst)
+{
+  // Taking the cup undoes where the goal wants it: leaving it is tried first, though the
+  // domain says it second. The book is taken at once: the goal says nothing about it
+  Solved s = solve("(:htn :ordered-subtasks (and (tidy cup) (tidy book)))",
+      "(:goal (and (in cup c) (holding r1 book)))");
+  ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
+  EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
+  EXPECT_EQ(s.result.plan.find("pick r1 cup"), std::string::npos) << s.result.plan;
+  EXPECT_NE(s.result.plan.find("pick r1 book"), std::string::npos) << s.result.plan;
+}
+
+TEST(LiftedTest, ShorterPlansAfterTheFirst)
+{
+  // Bringing the book first takes the robot away from the cup: after that plan, one of half
+  // its length is looked for, and there is none; the answer is still a plan
+  Solved s = solve("(:htn :ordered-subtasks (and (bring book d) (bring cup a)))");
+  ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
+  EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
+  EXPECT_GE(s.result.plans, 1u);
+  EXPECT_GT(s.result.steps, 4u);
 }
 
 TEST(LiftedTest, TotalOrderOnly)

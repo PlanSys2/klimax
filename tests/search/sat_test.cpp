@@ -15,6 +15,8 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -68,9 +70,11 @@ struct Solved
 {
   Result result;
   verifier::Outcome checked;
+  int pieces = 0;
 };
 
-Solved solve(std::string_view htn, std::string_view goal = "")
+// With `polls`, the search runs in pieces: each stops after that many looks at the clock
+Solved solve(std::string_view htn, std::string_view goal = "", int polls = 0)
 {
   auto d = hddl::parse_domain(kDomain, "d.hddl");
   auto p = hddl::parse_problem(
@@ -85,7 +89,26 @@ Solved solve(std::string_view htn, std::string_view goal = "")
   auto g = tdg::ground(m.value());
   EXPECT_TRUE(g.ok());
   Solved s;
-  s.result = sat(g.value());
+  if (polls == 0) {
+    s.result = sat(g.value());
+  } else {
+    using Clock = kairos::BudgetConfig::Clock;
+    Clock::time_point now{};
+    SatSearch search(g.value());
+    for (s.pieces = 0; s.pieces < 100000; ++s.pieces) {
+      kairos::BudgetConfig config;
+      config.clock = [&]() {return now += std::chrono::milliseconds(1);};
+      config.deadline = now + std::chrono::milliseconds(polls);
+      config.check_interval = 1;
+      config.check_period = std::chrono::microseconds(0);
+      config.memory_probe = []() {return std::optional<size_t>();};
+      kairos::Budget budget(config);
+      s.result = search.run(&budget);
+      if (s.result.outcome != Outcome::OutOfBudget) {
+        break;
+      }
+    }
+  }
   if (s.result.outcome == Outcome::Solved) {
     s.checked = verifier::verify(m.value(), s.result.plan);
   }
@@ -115,6 +138,21 @@ TEST(SatSearchTest, RecursionTakesMoreLayers)
   EXPECT_NE(s.result.plan.find("load chair"), std::string::npos) << s.result.plan;
 }
 
+TEST(SatSearchTest, GoesOnAfterTheBudgetRanOut)
+{
+  const char * htn = "(:htn :ordered-subtasks (and (make chair) (make table) (ship chair)))";
+  const char * goal = "(:goal (and (coloured chair red) (coloured table blue) (smooth table)))";
+  const Solved whole = solve(htn, goal);
+  ASSERT_EQ(whole.result.outcome, Outcome::Solved) << whole.result.message;
+  for (int polls : {2, 3, 7}) {
+    const Solved s = solve(htn, goal, polls);
+    ASSERT_EQ(s.result.outcome, Outcome::Solved) << polls;
+    EXPECT_GT(s.pieces, 1) << polls;
+    EXPECT_TRUE(s.checked.valid) << polls << s.checked.reason;
+    EXPECT_EQ(s.result.plan, whole.result.plan) << polls;
+  }
+}
+
 TEST(SatSearchTest, NothingToDo)
 {
   Solved s = solve("(:htn :ordered-subtasks (and (fetch yard)))");
@@ -123,11 +161,13 @@ TEST(SatSearchTest, NothingToDo)
   EXPECT_EQ(s.result.steps, 0u);
 }
 
-TEST(SatSearchTest, TotalOrderOnly)
+TEST(SatSearchTest, PartialOrderInOneOrder)
 {
-  Solved s = solve("(:htn :subtasks (and (make chair) (make table)))");
-  EXPECT_EQ(s.result.outcome, Outcome::Unsupported);
-  EXPECT_FALSE(s.result.message.empty());
+  // The tasks may go in any order: it takes one, and the plan is valid for the problem
+  Solved s = solve("(:htn :subtasks (and (make chair) (make table)))",
+      "(:goal (and (coloured chair green) (coloured table red)))");
+  ASSERT_EQ(s.result.outcome, Outcome::Solved) << s.result.message;
+  EXPECT_TRUE(s.checked.valid) << s.checked.reason << "\n" << s.result.plan;
 }
 
 }  // namespace

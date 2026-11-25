@@ -16,6 +16,7 @@
 #include "search/lifted.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -23,7 +24,7 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -78,6 +79,14 @@ struct Required
                return a.variable == b.variable && a.index == b.index;
              });
   }
+};
+
+// An atom that an action adds or deletes, over the parameters of the method it is a step of
+struct Touch
+{
+  bool add;
+  uint32_t predicate;
+  std::vector<Arg> args;
 };
 
 // What a method or an action asks of its parameters (the initial task network too)
@@ -167,6 +176,7 @@ struct Frame
   Choice start;               // Root, Action: what is known of the parameters
   bool started = false;
   size_t method = 0;          // Method: the next one of the task to try
+  std::vector<uint32_t> order;  // Method: the methods in the order to try them, if not the domain's
   std::vector<Level> levels;
 };
 
@@ -185,7 +195,9 @@ public:
       budget_ = budget;
       out_ = false;
       last_ = Result();
+      run_from_ = std::chrono::steady_clock::now();
       search(last_);
+      spent_ = seconds();
       last_.expansions = expansions_;
     }
     return last_;
@@ -214,9 +226,19 @@ private:
     uint32_t & current = current_;
     bool & forward = forward_;  // false: go back to the last choice point with a way not tried
     while (true) {
+      if (improving_ && (out_ || ((++ticks_ & 255u) == 0 && (seconds() > allowance_ ||
+        (budget_ != nullptr && budget_->exhausted())))))
+      {
+        result = best_;  // no time for a shorter one
+        return;
+      }
       if (out_ || (budget_ != nullptr && budget_->exhausted())) {
         result.outcome = Outcome::OutOfBudget;
         finished_ = false;
+        return;
+      }
+      if (cells_.size() > kCells && improving_) {
+        result = best_;
         return;
       }
       if (cells_.size() > kCells) {
@@ -266,6 +288,14 @@ private:
           current = kNone;
           continue;
         }
+        if (!forward && improving_) {
+          // Nothing that short: one more try, less ambitious, or the plan there is
+          if (++stage_ > 1 || !shorter()) {
+            result = best_;
+            return;
+          }
+          continue;
+        }
         if (!forward) {
           result.outcome = complete_ ? Outcome::Unsolvable : Outcome::OutOfBudget;
           if (!complete_) {
@@ -281,12 +311,22 @@ private:
         if ((!m_.problem.goal.valid() || problem_.holds(m_.problem.goal, state_, env)) &&
           settle())
         {
-          result.outcome = Outcome::Solved;
-          result.plan = plan();
-          result.steps = sequence_.size();
-          result.plans = 1;
-          result.message = "depth first, not grounded";
-          return;
+          best_.outcome = Outcome::Solved;
+          best_.plan = plan();
+          best_.steps = sequence_.size();
+          ++best_.plans;
+          best_.message = "depth first, not grounded";
+          // The first plan of a search in depth may be many times longer than needed: for
+          // half as long as it took, within limits, plans half as long are looked for
+          if (!improving_) {
+            improving_ = true;
+            allowance_ = seconds() + std::clamp(0.5 * seconds(), kImprove, 25.0 * kImprove);
+          }
+          stage_ = 0;
+          if (!shorter()) {
+            result = best_;
+            return;
+          }
         }
         continue;
       }
@@ -300,6 +340,9 @@ private:
         for (size_t i = 0; i < task.params.size(); ++i) {
           choice.binding[i] = value(args_[cell.args + i]);
           pending = pending || choice.binding[i] >= kVariable;
+        }
+        if (sequence_.size() >= longest_) {
+          continue;
         }
         if (!pending) {
           if (apply(cell.task, choice.binding)) {
@@ -339,8 +382,87 @@ private:
       Frame frame;
       frame.cell = current;
       mark(frame);
+      if (!goal_.empty() && m_.methods_of[cell.task].size() > 1) {
+        by_goal(cell, frame.order);
+      }
       frames_.push_back(std::move(frame));
     }
+  }
+
+  // The methods of the task, first those whose actions undo less of the goal: the atoms of
+  // the goal that hold now and an action of the method deletes, less those that do not hold
+  // and one adds. A parameter that the task does not fix matches anything. Ties in the order
+  // of the domain
+  void by_goal(const Cell & cell, std::vector<uint32_t> & order) const
+  {
+    const std::vector<uint32_t> & methods = m_.methods_of[cell.task];
+    std::vector<std::pair<int, uint32_t>> ranked;
+    bool differ = false;
+    for (uint32_t i = 0; i < methods.size(); ++i) {
+      const uint32_t m = methods[i];
+      int undone = 0;
+      Choice choice;
+      choice.method = m;
+      choice.binding.assign(m_.methods[m].params.size(), kNone);
+      if (!touches_[m].empty() && unify(m_.methods[m], methods_[m], cell, choice)) {
+        for (const Touch & touch : touches_[m]) {
+          for (const Atom & wanted : goal_) {
+            if (wanted[0] != touch.predicate || wanted.size() != touch.args.size() + 1 ||
+              (state_.count(wanted) != 0) == touch.add)
+            {
+              continue;
+            }
+            bool match = true;
+            for (size_t k = 0; match && k < touch.args.size(); ++k) {
+              const Arg & x = touch.args[k];
+              const uint32_t v = !x.variable ? x.index :
+                choice.binding[x.index] == kNone ? kNone : value(choice, choice.binding[x.index]);
+              match = v >= kVariable || v == wanted[k + 1];
+            }
+            undone += match ? (touch.add ? -1 : 1) : 0;
+          }
+        }
+      }
+      differ = differ || undone != 0;
+      ranked.emplace_back(undone, i);
+    }
+    if (!differ) {
+      return;
+    }
+    std::sort(ranked.begin(), ranked.end());
+    for (const auto & [undone, i] : ranked) {
+      (void)undone;
+      order.push_back(methods[i]);
+    }
+  }
+
+  static constexpr double kImprove = 0.002;    // seconds, at least, looking for a shorter plan
+
+  double seconds() const
+  {
+    return spent_ + std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - run_from_).count();
+  }
+
+  // Starts again for a plan shorter than the one found: half as long, then three quarters.
+  // False if there is nothing shorter to try
+  bool shorter()
+  {
+    const size_t target = stage_ == 0 ? best_.steps / 2 : best_.steps * 3 / 4;
+    if (best_.steps == 0 || target >= best_.steps || (stage_ == 1 && target == best_.steps / 2)) {
+      return false;
+    }
+    while (!frames_.empty()) {
+      restore(frames_.back());
+      frames_.pop_back();
+    }
+    longest_ = target;
+    rooted_ = false;
+    cut_ = false;
+    seen_.clear();
+    current_ = kNone;
+    forward_ = false;
+    return true;
   }
 
   static constexpr size_t kSeen = 5000000;     // tasks and states remembered
@@ -415,7 +537,8 @@ private:
       return true;
     }
     const Cell & cell = cells_[frame.cell];
-    const std::vector<uint32_t> & methods = m_.methods_of[cell.task];
+    const std::vector<uint32_t> & methods =
+      frame.order.empty() ? m_.methods_of[cell.task] : frame.order;
     while (frame.method < methods.size()) {
       const uint32_t m = methods[frame.method++];
       Choice choice;
@@ -662,6 +785,82 @@ private:
       schema.own = schema.required.size();
     }
     pull_up();
+    touches();
+  }
+
+  void touched(ast::EffectId id, const ast::Action & a, std::vector<Touch> & out)
+  {
+    const ast::Effect & e = m_.pddl.nodes.effects[id];
+    if (e.kind == ast::EffectKind::And) {
+      for (ast::EffectId c : e.children) {
+        touched(c, a, out);
+      }
+      return;
+    }
+    if (e.kind != ast::EffectKind::Add && e.kind != ast::EffectKind::Delete) {
+      return;
+    }
+    Touch touch{e.kind == ast::EffectKind::Add, domain_.predicate(e.name), {}};
+    for (ast::TermId t : e.args) {
+      const ast::Term & term = domain_.term(t);
+      if (term.kind == ast::TermKind::Name) {
+        touch.args.push_back(Arg{false, domain_.object(term.name)});
+        continue;
+      }
+      size_t p = 0;
+      while (p < a.params.size() && a.params[p].name != term.name) {
+        ++p;
+      }
+      if (term.kind != ast::TermKind::Variable || p == a.params.size()) {
+        return;
+      }
+      touch.args.push_back(Arg{true, static_cast<uint32_t>(p)});
+    }
+    out.push_back(std::move(touch));
+  }
+
+  // The atoms of the goal, and what the actions of each method add and delete, over the
+  // parameters of the method: only for problems with a goal
+  void touches()
+  {
+    if (!m_.problem.goal.valid()) {
+      return;
+    }
+    std::vector<ast::FormulaId> atoms;
+    problem_.required(m_.problem.goal, atoms);
+    Env env;
+    for (ast::FormulaId id : atoms) {
+      const ast::Formula & f = problem_.formula(id);
+      bool ground = true;
+      for (ast::TermId t : f.args) {
+        ground = ground && problem_.term(t).kind == ast::TermKind::Name;
+      }
+      if (ground) {
+        goal_.push_back(problem_.atom(f.name, f.args, env));
+      }
+    }
+    touches_.resize(m_.methods.size());
+    if (goal_.empty()) {
+      return;
+    }
+    for (size_t m = 0; m < m_.methods.size(); ++m) {
+      for (const hddl::Step & step : m_.methods[m].network.steps) {
+        const hddl::TaskInfo & task = m_.tasks[step.task];
+        if (!task.primitive || !m_.pddl.actions[task.action].effect.valid()) {
+          continue;
+        }
+        std::vector<Touch> of_action;
+        touched(m_.pddl.actions[task.action].effect, m_.pddl.actions[task.action], of_action);
+        for (Touch & touch : of_action) {
+          for (Arg & x : touch.args) {
+            if (x.variable) {
+              x = step.args[x.index];
+            }
+          }
+          touches_[m].push_back(std::move(touch));
+        }
+      }
+    }
   }
 
   void changed(ast::EffectId id, std::vector<bool> & changes)
@@ -893,13 +1092,23 @@ private:
     sequence_.resize(frame.sequence);
   }
 
+  // Under a bound on the length, the same again counts only with fewer actions done
   bool fresh(uint64_t key)
   {
+    const uint32_t actions = static_cast<uint32_t>(sequence_.size());
     if (seen_.size() >= kSeen) {
       complete_ = false;
-      return seen_.count(key) == 0;
+      const auto it = seen_.find(key);
+      return it == seen_.end() || actions < it->second;
     }
-    return seen_.insert(key).second;
+    const auto [it, fresh] = seen_.emplace(key, actions);
+    if (!fresh) {
+      if (it->second <= actions) {
+        return false;
+      }
+      it->second = actions;
+    }
+    return true;
   }
 
   // The variable (a reference to it) takes a value now: an object or another variable
@@ -1263,12 +1472,22 @@ private:
   Result last_;
   uint32_t current_ = kNone;                       // the first pending task
   bool forward_ = false;
+  size_t longest_ = ~size_t{0};                    // actions allowed: fewer than the plan found
+  bool improving_ = false;                         // a plan was found: looking for a shorter one
+  Result best_;
+  int stage_ = 0;                                  // 0: half as long; 1: three quarters
+  double allowance_ = 0.0;                         // seconds of search until which to improve
+  double spent_ = 0.0;                             // seconds of search in the calls before
+  std::chrono::steady_clock::time_point run_from_;
+  uint32_t ticks_ = 0;
   uint32_t repeats_ = 0;                           // of a task from itself, allowed
   bool cut_ = false;                               // some were left out for that
   Interpreter domain_;
   Interpreter problem_;
   Schema initial_;
   std::vector<Schema> methods_;
+  std::vector<Atom> goal_;                         // the atoms that the goal requires
+  std::vector<std::vector<Touch>> touches_;        // by method: what its actions add and delete
   std::vector<Schema> actions_;                    // by task; the primitive ones
   State state_;
   std::vector<std::set<Atom>> facts_;              // the state by predicate, in a fixed order
@@ -1285,7 +1504,7 @@ private:
   std::vector<Node> nodes_;
   std::vector<uint32_t> sequence_;                 // nodes of the actions done
   std::vector<Frame> frames_;
-  std::unordered_set<uint64_t> seen_;
+  std::unordered_map<uint64_t, uint32_t> seen_;    // the fewest actions done when seen
   bool complete_ = true;
   bool out_ = false;                               // the budget ran out while choosing
   uint64_t work_ = 0;

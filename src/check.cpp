@@ -438,7 +438,8 @@ SolveResult solve(
       found = search::Result();
       found.outcome = search::Outcome::OutOfBudget;
     } else if (!answered) {
-      if (sharing || only_sat) {
+      // With partial order too: it takes each network in one of the orders it allows
+      if (!options.anytime) {
         by_sat.emplace(ground->value());
       }
       budget.emplace(config);

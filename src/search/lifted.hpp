@@ -33,7 +33,9 @@ namespace klimax::search
  * its methods. The methods are tried in the order of the domain; the parameters that the task
  * leaves free take the values with which the precondition holds in the current state, found by
  * matching the atoms it requires against the state. A task and state already seen, with the
- * same tasks pending after it, is not searched again. A task that comes from itself with the
+ * same tasks pending after it, is not searched again. The first plan of such a search may be
+ * many times longer than needed: for half as long as it took, plans half as long are looked
+ * for, and the shortest found is the answer. A task that comes from itself with the
  * same arguments and in the same state is a recursion that does not progress: it is cut, and
  * if no plan is found the search starts again allowing it once more, up to a few times. The
  * atoms of predicates that no action changes, which the actions of a method will require, are

@@ -51,8 +51,7 @@ public:
   ~SatSearch();
 
   /// @brief Searches until it ends or the budget runs out (OutOfBudget, with no message). After
-  /// the budget ran out, another call goes on from where that one stopped. Adding a layer is
-  /// not interrupted.
+  /// the budget ran out, another call goes on from where that one stopped.
   Result run(kairos::Budget * budget = nullptr);
 
 private:

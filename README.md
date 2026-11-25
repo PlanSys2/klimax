@@ -34,8 +34,8 @@ Datalog engine). It does not depend on ROS.
 > [roadmap](docs/roadmap.md).
 
 **How it compares**: on the benchmark of the HTN tracks of IPC 2023, with every plan checked by
-the IPC verifier and the same limits for all, Klimax solves 612 of the 761 total-order problems
-in 30 s (the best of the other thirteen configurations measured, 494) and 234 of the 283
+the IPC verifier and the same limits for all, Klimax solves 620 of the 761 total-order problems
+in 30 s (the best of the other thirteen configurations measured, 494) and 251 of the 283
 partial-order ones (the best of the other seven, 207). Results by domain, where it is behind and
 the method in [docs/results.md](docs/results.md) and [docs/baseline.md](docs/baseline.md).
 

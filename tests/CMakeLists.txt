@@ -42,6 +42,8 @@ klimax_add_gtest(verifier_test hddl/verifier_test.cpp)
 klimax_add_gtest(grounder_test hddl/grounder_test.cpp)
 klimax_add_gtest(total_order_test search/total_order_test.cpp)
 klimax_add_gtest(lifted_test search/lifted_test.cpp)
+klimax_add_gtest(sat_solver_test sat/solver_test.cpp)
+klimax_add_gtest(sat_search_test search/sat_test.cpp)
 
 if(KLIMAX_BUILD_CLI)
   add_test(NAME cli_version COMMAND klimax_cli --version)

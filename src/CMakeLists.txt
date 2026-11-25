@@ -23,7 +23,9 @@ add_library(klimax_objects OBJECT
   hddl/model.cpp
   hddl/parser.cpp
   hddl/split.cpp
+  sat/solver.cpp
   search/lifted.cpp
+  search/sat.cpp
   search/total_order.cpp
   tdg/grounder.cpp
   verify/verifier.cpp

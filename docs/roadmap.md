@@ -23,7 +23,10 @@ in [baseline.md](baseline.md).
   ([results.md](results.md) lists which).
 - **Without grounding** (H4): a totally ordered problem is also searched as written, depth
   first, with the parameters that a method leaves free bound when a precondition needs them.
-  The two searches share the time.
+  The searches share the time.
+- **By satisfiability** (H4): a totally ordered problem is also searched as a formula, by layers
+  of decomposition, with a SAT solver of its own. It is what solves the domains whose methods
+  leave many parameters free (Woodworking, Monroe).
 - **Anytime and optimal** (H4): after the first plan Klimax looks for shorter ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans
@@ -34,11 +37,11 @@ in [baseline.md](baseline.md).
 - A heuristic for the search that does not ground: it is depth first in the order of the
   domain, and most of the total-order problems whose ground form is too large (Snake,
   Minecraft-Player) are still out of its reach.
-- Woodworking and Monroe (partially observable): the methods leave many parameters free and
-  only the goal, at the end, says which values were right. The planners that solve them
-  (Lilotane, PDDL4J) encode the problem for a SAT solver.
-- Domains where a planner of the baseline solves more: Woodworking, Hiking, Blocksworld-GTOHP,
-  Monroe (partially observable).
+- The search by satisfiability encodes the ground problem: its formula grows with the number
+  of ground methods, and the sharing of the time costs the other searches problems that they
+  solved near the limit. Encoding the problem as written, as Lilotane does, would make it
+  smaller.
+- Domains where a planner of the baseline solves more: Blocksworld-GTOHP, Hiking, Logistics.
 - An optimal search with an admissible heuristic. With partial order, a proof that does not
   keep every node in memory: it is what stops Klimax in Colouring, Rover and Transport.
 

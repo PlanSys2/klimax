@@ -33,6 +33,7 @@
 #include "kairos/diagnostics.hpp"
 #include "pddl/lexer.hpp"
 #include "search/lifted.hpp"
+#include "search/sat.hpp"
 #include "search/total_order.hpp"
 #include "tdg/grounder.hpp"
 #include "verify/verifier.hpp"
@@ -43,12 +44,21 @@ namespace klimax
 namespace
 {
 
-// The search that does not ground: seconds before grounding, then its part of the time passed
-// and the least it runs at once
+// The search that does not ground: seconds before grounding and the least it runs at once
 constexpr double kLiftedFirst = 0.03;
-constexpr double kLiftedShare = 0.25;
 constexpr double kLiftedPiece = 0.005;
+// The part of the time of the search that does not ground and of the one by satisfiability:
+// in the first kEarly seconds, where most plans come from the search of the ground problem,
+// and after them. Measured on the total-order benchmark of IPC 2023
+constexpr double kEarly = 1.0;
+constexpr double kLiftedShare[2] = {0.25, 0.2};
+constexpr double kSatShare[2] = {0.25, 0.5};
 
+// The seconds that a search with those parts is due when `elapsed` have passed
+double due(const double share[2], double elapsed)
+{
+  return share[0] * std::min(elapsed, kEarly) + share[1] * std::max(0.0, elapsed - kEarly);
+}
 
 void append(
   std::vector<Diagnostic> & out, const std::vector<kairos::Diagnostic> & in,
@@ -313,11 +323,13 @@ SolveResult solve(
     deadline = start + std::chrono::duration_cast<Clock::duration>(
       std::chrono::duration<double>(options.seconds));
   }
-  // Two ways of searching share the time. The one that does not ground goes first for a
+  // Three ways of searching share the time. The one that does not ground goes first for a
   // moment: when it finds a plan it does so at once in most problems. Then the problem is
-  // grounded and searched, and the first one goes on in between, in pieces, for kLiftedShare of
-  // the time passed; it has the rest if the other gives up. Looking for the shortest plan needs
-  // the ground problem: the first one runs then only if the problem cannot be grounded in time
+  // grounded and searched, and the other two go on in between, in pieces: the first one for
+  // kLiftedShare of the time passed, the one by satisfiability, once the problem is grounded,
+  // for kSatShare, which grows after the first second. They have the rest if the search of the ground problem gives up. Looking for
+  // the shortest plan needs that search alone: the first one runs then only if the problem
+  // cannot be grounded in time
   search::Result found;
   search::LiftedSearch lifted(model.value());
   bool lifted_ended = !model->total_order;
@@ -349,7 +361,9 @@ SolveResult solve(
       return Clock::now() + std::chrono::duration_cast<Clock::duration>(
         std::chrono::duration<double>(seconds));
     };
-  const bool sharing = !lifted_ended && !options.anytime;
+  // For measuring: the search by satisfiability alone
+  const bool only_sat = std::getenv("KLIMAX_SAT") != nullptr;
+  const bool sharing = !lifted_ended && !options.anytime && !only_sat;
   if (sharing && std::getenv("KLIMAX_NOT_GROUNDED") != nullptr) {
     run_lifted(deadline);  // for measuring: that search alone
     if (!answered) {
@@ -369,15 +383,43 @@ SolveResult solve(
     kairos::BudgetConfig config;
     config.stop = stop.get_token();
     config.deadline = deadline ? *deadline : start + std::chrono::hours(24 * 365);
+    std::optional<search::SatSearch> by_sat;  // once the problem is grounded
+    bool sat_ended = false;
+    double sat_seconds = 0.0;
+    auto run_sat = [&](std::optional<Clock::time_point> until) {
+        const Clock::time_point from = Clock::now();
+        kairos::BudgetConfig limits;
+        limits.deadline = until;
+        limits.check_period = std::chrono::microseconds(1000);
+        kairos::Budget budget(limits);
+        search::Result r;
+        try {
+          r = by_sat->run(&budget);
+        } catch (const std::bad_alloc &) {
+          r.outcome = search::Outcome::Unsupported;
+        }
+        sat_seconds += seconds_since(from);
+        sat_ended = r.outcome != search::Outcome::OutOfBudget || !r.message.empty();
+        if (r.outcome == search::Outcome::Solved) {
+          found = std::move(r);
+          answered = true;
+        }
+      };
     config.clock = [&]() {
-        if (sharing && !lifted_ended) {
-          const double due = kLiftedShare * seconds_since(start) - lifted_seconds;
-          if (due >= kLiftedPiece) {
-            run_lifted(sooner(in(due)));
-            if (answered) {
-              stop.request_stop();
-            }
+        if (sharing && !lifted_ended && !answered) {
+          const double more = due(kLiftedShare, seconds_since(start)) - lifted_seconds;
+          if (more >= kLiftedPiece) {
+            run_lifted(sooner(in(more)));
           }
+        }
+        if (by_sat && !sat_ended && !answered) {
+          const double more = due(kSatShare, seconds_since(start)) - sat_seconds;
+          if (more >= kLiftedPiece) {
+            run_sat(sooner(in(more)));
+          }
+        }
+        if (answered) {
+          stop.request_stop();
         }
         return Clock::now();
       };
@@ -396,6 +438,9 @@ SolveResult solve(
       found = search::Result();
       found.outcome = search::Outcome::OutOfBudget;
     } else if (!answered) {
+      if (sharing || only_sat) {
+        by_sat.emplace(ground->value());
+      }
       budget.emplace(config);
       search::Result grounded;
       try {
@@ -409,7 +454,12 @@ SolveResult solve(
               }
             };
         }
-        grounded = search::total_order(ground->value(), &*budget, how);
+        if (only_sat) {
+          run_sat(deadline);
+          grounded.outcome = search::Outcome::OutOfBudget;
+        } else {
+          grounded = search::total_order(ground->value(), &*budget, how);
+        }
       } catch (const std::bad_alloc &) {
         grounded = search::Result();
         grounded.outcome = search::Outcome::OutOfBudget;
@@ -419,10 +469,21 @@ SolveResult solve(
         found = std::move(grounded);
       }
     }
-    if (!answered && found.outcome == search::Outcome::OutOfBudget && !lifted_ended) {
-      ground.reset();
-      run_lifted(deadline);
+    // The search of the ground problem gave up: the other two take turns, each time longer
+    if (!answered && found.outcome == search::Outcome::OutOfBudget && !only_sat) {
+      auto over = [&]() {return deadline && Clock::now() >= *deadline;};
+      for (double piece = 0.05; !answered && !over() &&
+        (!lifted_ended || (by_sat && !sat_ended)); piece *= 2.0)
+      {
+        if (!lifted_ended) {
+          run_lifted(sooner(in(piece)));
+        }
+        if (by_sat && !sat_ended && !answered) {
+          run_sat(sooner(in(piece)));
+        }
+      }
     }
+    by_sat.reset();
   }
   result.search_ms = since() - result.ground_ms;
   result.expansions = found.expansions;

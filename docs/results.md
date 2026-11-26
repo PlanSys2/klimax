@@ -163,7 +163,7 @@ its solver, since it is run from Python (below), which takes half a second more.
 
 ## Time
 
-A first measure, on thirty problems generated for it (three families of ten, of growing size)
+A first measure, on forty problems generated for it (four families of ten, of growing size)
 while the reference benchmark of the [roadmap](roadmap.md) is not published: its generators
 will be. Each family has durative actions and tasks that the initial network does not order:
 
@@ -171,6 +171,8 @@ will be. Each family has durative actions and tasks that the initial network doe
 - **Satellite**: a satellite takes images of sites that are visible only for a while (timed
   initial literals).
 - **Workshop**: pieces go through two machines in order; a machine does one piece at a time.
+- **Cellar**: fuses are mended by the light of matches that burn for a while: mending has to
+  overlap the match.
 
 Both planners get the same problem through Unified Planning, at 30 s per problem, one core and
 8 GB, with every plan checked by Klimax's verifier and, for Klimax, by Kairos' validator:
@@ -180,19 +182,20 @@ Both planners get the same problem through Unified Planning, at 30 s per problem
 | Transport | 10 | 0 |
 | Satellite | 10 | 10 |
 | Workshop | 10 | 10 |
-| **Total** | **30 of 30** | **20 of 30** |
+| Cellar | 10 | 10 |
+| **Total** | **40 of 40** | **30 of 40** |
 
-- Aries is `up-aries` 0.5.0. In Transport it runs out of time in six problems and gives a plan
-  in the four smallest, which the verifier rejects: each `drive` lasts 0.1 more than the
+- Aries is `up-aries` 0.5.0. In Transport it runs out of time in five problems and gives a
+  plan in the five smallest, which the verifier rejects: each `drive` lasts 0.1 more than the
   problem says (the length of its road). They are counted as not solved; with durations taken
-  loosely they would be four more.
-- In the twenty that both solve the plans of Klimax end at 2942 in all and those of Aries at
-  3040. Klimax's is the shorter in nine and Aries' in five.
-- Both are run from Python, which takes about 0.65 s before the planner starts: within 1 s
-  Klimax solves 26 and Aries 2.
+  loosely they would be five more.
+- In the thirty that both solve the plans of Klimax end at 3218 in all and those of Aries at
+  3314. Klimax's is the shorter in fifteen and Aries' in seven.
+- Both are run from Python. Within 1 s of the whole process Klimax solves 34 and Aries 29.
 - Klimax finds a plan with one durative action after another and then lets Kairos' scheduler
   overlap what the hierarchy and the actions allow. In Satellite, where the scheduler does not
-  read the timed initial literals, the plans stay with one action after another.
+  read the timed initial literals, the plans stay with one action after another. In Cellar no
+  such plan exists, and the start and the end of each action are planned as two steps.
 
 ## Notes
 

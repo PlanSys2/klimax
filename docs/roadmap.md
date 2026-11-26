@@ -71,7 +71,7 @@ in [baseline.md](baseline.md).
   needs what another gives only while it runs) is reported as not supported, and so is one with
   no plan of that kind, never as unsolvable. Timed initial literals, durative methods, the
   duration and the time points of tasks in constraints, and `?duration` inside conditions or
-  effects are not read yet either: not supported, never accepted. The verifier does not follow
+  effects are not read yet either: not supported, never accepted. The verifier does follow
   plans whose actions overlap.
 - Where a resource decides the plan the heuristics do not see it: the seven largest problems
   of Transport_fuel (58 to 82 places) run out of time, and take 0.15 s without the fuel.

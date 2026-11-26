@@ -98,26 +98,49 @@ TEST(TemporalTest, TheVerifierChecksTimesAndDurations)
   EXPECT_FALSE(verify(kDomain, problem(), plan("2 bake cup")).valid);
 }
 
+// A light that is on only while its switch is held: reading needs both at once
+std::string light(const std::string & subtasks)
+{
+  return "(define (domain d) (:requirements :typing :hierarchy :durative-actions)\n"
+         " (:predicates (light) (read))\n"
+         " (:task study :parameters ())\n"
+         " (:method m :parameters () :task (study) " + subtasks + " (and (hold) (look)))\n"
+         " (:durative-action hold :parameters () :duration (= ?duration 5)\n"
+         "  :condition (and) :effect (and (at start (light)) (at end (not (light)))))\n"
+         " (:durative-action look :parameters () :duration (= ?duration 2)\n"
+         "  :condition (and (over all (light))) :effect (at end (read))))";
+}
+
+const char * kStudy = "(define (problem p) (:domain d)\n"
+  "(:htn :subtasks (and (study))) (:init) (:goal (read)))";
+
 TEST(TemporalTest, WhatIsNotPlannedYetIsSaid)
 {
   // Timed initial literals
   SolveResult r = solve(kDomain, problem("(at 5 (hot))"));
   EXPECT_EQ(r.status, Status::Unsupported) << r.plan;
-  // A light that is on only while its switch is held: reading needs both at once, and
-  // "no plan" would be false
-  const char * domain =
-    "(define (domain d) (:requirements :typing :hierarchy :durative-actions)\n"
-    " (:predicates (light) (read))\n"
-    " (:task study :parameters ())\n"
-    " (:method m :parameters () :task (study) :subtasks (and (hold) (look)))\n"
-    " (:durative-action hold :parameters () :duration (= ?duration 5)\n"
-    "  :condition (and) :effect (and (at start (light)) (at end (not (light)))))\n"
-    " (:durative-action look :parameters () :duration (= ?duration 2)\n"
-    "  :condition (and (over all (light))) :effect (at end (read))))";
-  r = solve(domain, "(define (problem p) (:domain d)\n"
-      "(:htn :subtasks (and (study))) (:init) (:goal (read)))");
+  // Actions that must overlap: "no plan" would be false
+  r = solve(light(":subtasks"), kStudy);
   EXPECT_EQ(r.status, Status::Unsupported) << r.message << r.plan;
   EXPECT_FALSE(r.message.empty());
+}
+
+TEST(TemporalTest, TheVerifierFollowsActionsThatOverlap)
+{
+  auto plan = [](const std::string & look) {
+      return "==>\n1 0: (hold) [5]\n2 " + look + ": (look) [2]\nroot 3\n3 study -> m 1 2\n<==\n";
+    };
+  VerifyResult v = verify(light(":subtasks"), kStudy, plan("1"));
+  EXPECT_TRUE(v.valid) << v.reason;
+  ASSERT_TRUE(v.makespan.has_value());
+  EXPECT_NEAR(*v.makespan, 5.0, 1e-9);
+  // Looking once the light is off, or still looking when it goes off
+  EXPECT_FALSE(verify(light(":subtasks"), kStudy, plan("6")).valid);
+  EXPECT_FALSE(verify(light(":subtasks"), kStudy, plan("4")).valid);
+  // The method orders them: looking cannot start before holding ends
+  v = verify(light(":ordered-subtasks"), kStudy, plan("1"));
+  EXPECT_FALSE(v.valid);
+  EXPECT_NE(v.reason.find("too early"), std::string::npos) << v.reason;
 }
 
 }  // namespace

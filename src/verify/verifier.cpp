@@ -648,7 +648,12 @@ private:
   void build_events()
   {
     for (Node & n : nodes_) {
-      if (n.primitive) {
+      if (n.primitive && m_.tasks[n.task].durative) {
+        // It starts and it ends: other steps may come in between
+        n.start = event();
+        n.end = event();
+        edge(n.start, n.end);
+      } else if (n.primitive) {
         n.start = n.end = event();
       } else {
         n.start = event();
@@ -800,21 +805,52 @@ private:
     }
   }
 
-  // A durative action that no other overlaps: its conditions at start, its effects at start,
-  // its conditions over all and at end, its effects at end
-  void durative(const ast::DurativeAction & a, val::Bindings & env, const Node & n, Timed & when)
+  // A durative action under way: its parameters, and the state it started in if its effects at
+  // end depend on it
+  struct Running
   {
+    val::Bindings env;
+    double duration = 0.0;
+    std::optional<val::State> before;
+  };
+
+  void check(
+    const ast::DurativeAction & a, const Node & n, Running & running, val::Phase phase,
+    const char * which)
+  {
+    const val::Evaluator::Ctx c{
+      state_, running.before ? &*running.before : nullptr, phase, running.duration};
+    bool ok = false;
+    try {
+      ok = !a.condition.valid() || world_.domain_eval.holds(a.condition, c, running.env);
+    } catch (const val::EvalError &) {
+      ok = false;
+    } catch (const val::Unsupported & u) {
+      invalid("unsupported: " + u.message);
+    }
+    if (!ok) {
+      invalid("step " + show(n) + " is not applicable: its condition " + which +
+        " does not hold");
+    }
+  }
+
+  // The start of a durative action: it lasts what its duration says, its conditions at start
+  // hold, and its effects at start take place
+  Running begin(const ast::DurativeAction & a, const Node & n, Timed & when)
+  {
+    Running running;
     for (size_t p = 0; p < a.params.size(); ++p) {
-      env.emplace_back(a.params[p].name, n.args[p]);
+      running.env.emplace_back(a.params[p].name, n.args[p]);
     }
     if (!durations_given_[n.position]) {
-      when.duration = duration(a, env, n);
+      when.duration = duration(a, running.env, n);
     }
+    running.duration = when.duration;
     using Ctx = val::Evaluator::Ctx;
     Ctx lasting{state_, nullptr, val::Phase::Instant, when.duration};
     lasting.duration_check = true;
     try {
-      if (a.duration.valid() && !world_.domain_eval.holds(a.duration, lasting, env)) {
+      if (a.duration.valid() && !world_.domain_eval.holds(a.duration, lasting, running.env)) {
         invalid("step " + show(n) + " does not last what its duration says");
       }
     } catch (const val::EvalError & e) {
@@ -822,35 +858,23 @@ private:
     } catch (const val::Unsupported & u) {
       invalid("unsupported: " + u.message);
     }
-    auto check = [&](val::Phase phase, const val::State * start, const char * which) {
-        const Ctx c{state_, start, phase, when.duration};
-        bool ok = false;
-        try {
-          ok = !a.condition.valid() || world_.domain_eval.holds(a.condition, c, env);
-        } catch (const val::EvalError &) {
-          ok = false;
-        } catch (const val::Unsupported & u) {
-          invalid("unsupported: " + u.message);
-        }
-        if (!ok) {
-          invalid("step " + show(n) + " is not applicable: its condition " + which +
-            " does not hold");
-        }
-      };
-    check(val::Phase::Start, nullptr, "at start");
-    // Effects at end may depend on the state at start
-    std::optional<val::State> before;
+    check(a, n, running, val::Phase::Start, "at start");
     if (a.effect.valid() && world_.domain_eval.has_when(a.effect)) {
-      before = state_;
+      running.before = state_;
     }
     if (a.effect.valid()) {
-      apply(a.effect, Ctx{state_, nullptr, val::Phase::Start, when.duration}, env, n);
+      apply(a.effect, Ctx{state_, nullptr, val::Phase::Start, when.duration}, running.env, n);
     }
-    const val::State * start = before ? &*before : nullptr;
-    check(val::Phase::Invariant, start, "over all");
-    check(val::Phase::End, start, "at end");
+    return running;
+  }
+
+  // Its end: the conditions at end, then the effects at end
+  void finish(const ast::DurativeAction & a, const Node & n, Running & running)
+  {
+    check(a, n, running, val::Phase::End, "at end");
     if (a.effect.valid()) {
-      apply(a.effect, Ctx{state_, start, val::Phase::End, when.duration}, env, n);
+      apply(a.effect, val::Evaluator::Ctx{state_, running.before ? &*running.before : nullptr,
+          val::Phase::End, running.duration}, running.env, n);
     }
   }
 
@@ -1028,11 +1052,109 @@ private:
     }
   }
 
+  void starts(const Node & n)
+  {
+    if (events_[n.start].pending != 0) {
+      invalid("step " + show(n) + " comes too early: " + blocker(n.start));
+    }
+  }
+
+  // An action without duration: applicable, and done
+  void instant(const Node & n, Timed & when)
+  {
+    val::Bindings env;
+    const ast::Action & a = m_.pddl.actions[m_.tasks[n.task].action];
+    for (size_t p = 0; p < a.params.size(); ++p) {
+      env.emplace_back(a.params[p].name, n.args[p]);
+    }
+    if (a.precondition.valid() && !holds(world_.domain_eval, a.precondition, env)) {
+      invalid("step " + show(n) + " is not applicable: its precondition does not hold");
+    }
+    if (a.effect.valid()) {
+      apply(a.effect, val::Evaluator::Ctx{state_}, env, n);
+    }
+    if (timed_ && when.duration != 0.0) {
+      invalid("step " + show(n) + " is an action without duration");
+    }
+    when.duration = 0.0;
+  }
+
+  // A plan without times: each step when the one before has ended
+  void one_after_another()
+  {
+    double clock = 0.0;
+    for (uint32_t index : sequence_) {
+      const Node & n = nodes_[index];
+      starts(n);
+      Timed & when = times_[n.position];
+      when.time = n.position == 0 ? 0.0 : clock + kEpsilon;
+      if (m_.tasks[n.task].durative) {
+        temporal_ = true;
+        const ast::DurativeAction & a = m_.pddl.durative_actions[m_.tasks[n.task].action];
+        Running running = begin(a, n, when);
+        place(n.start);
+        settle();
+        check(a, n, running, val::Phase::Invariant, "over all");
+        finish(a, n, running);
+      } else {
+        instant(n, when);
+      }
+      clock = when.time + when.duration;
+      place(n.end);
+      settle();
+    }
+  }
+
+  // A plan with times: the starts and the ends of its steps in the order of time; at the same
+  // time the ends first, then as the plan lists the steps. What must hold while an action
+  // runs, and the rules on what happens at once, are left to Kairos' validator
+  // (validate_times())
+  void happenings()
+  {
+    struct Happening
+    {
+      double time;
+      bool start;
+      uint32_t position;
+    };
+    std::vector<Happening> all;
+    for (uint32_t index : sequence_) {
+      const Node & n = nodes_[index];
+      const Timed & when = times_[n.position];
+      all.push_back(Happening{when.time, true, n.position});
+      if (m_.tasks[n.task].durative) {
+        temporal_ = true;
+        all.push_back(Happening{when.time + when.duration, false, n.position});
+      }
+    }
+    std::stable_sort(all.begin(), all.end(), [](const Happening & a, const Happening & b) {
+        return a.time != b.time ? a.time < b.time : a.start < b.start;
+      });
+    std::vector<Running> running(sequence_.size());
+    for (const Happening & h : all) {
+      const Node & n = nodes_[sequence_[h.position]];
+      Timed & when = times_[n.position];
+      if (!m_.tasks[n.task].durative) {
+        starts(n);
+        instant(n, when);
+      } else if (h.start) {
+        starts(n);
+        running[h.position] = begin(
+          m_.pddl.durative_actions[m_.tasks[n.task].action], n, when);
+      } else {
+        finish(m_.pddl.durative_actions[m_.tasks[n.task].action], n, running[h.position]);
+      }
+      place(h.start && m_.tasks[n.task].durative ? n.start : n.end);
+      settle();
+    }
+  }
+
   void execute()
   {
     is_leaf_.assign(events_.size(), false);
     for (uint32_t n : sequence_) {
       is_leaf_[nodes_[n].start] = true;
+      is_leaf_[nodes_[n].end] = true;
     }
     val::Bindings env;
     for (const ast::InitItem & item : m_.problem.init) {
@@ -1053,41 +1175,10 @@ private:
       }
     }
     settle();
-    for (uint32_t index : sequence_) {
-      const Node & n = nodes_[index];
-      if (events_[n.start].pending != 0) {
-        invalid("step " + show(n) + " comes too early: " + blocker(n.start));
-      }
-      Timed & when = times_[n.position];
-      // One step after another: a plan with steps that overlap is not followed yet
-      if (!timed_) {
-        when.time = n.position == 0 ? 0.0 : clock_ + kEpsilon;
-      } else if (n.position != 0 && when.time < clock_ - 1e-9) {
-        invalid("unsupported: step " + show(n) + " starts before the one before it ends");
-      }
-      env.clear();
-      if (m_.tasks[n.task].durative) {
-        temporal_ = true;
-        durative(m_.pddl.durative_actions[m_.tasks[n.task].action], env, n, when);
-      } else {
-        const ast::Action & a = m_.pddl.actions[m_.tasks[n.task].action];
-        for (size_t p = 0; p < a.params.size(); ++p) {
-          env.emplace_back(a.params[p].name, n.args[p]);
-        }
-        if (a.precondition.valid() && !holds(world_.domain_eval, a.precondition, env)) {
-          invalid("step " + show(n) + " is not applicable: its precondition does not hold");
-        }
-        if (a.effect.valid()) {
-          apply(a.effect, val::Evaluator::Ctx{state_}, env, n);
-        }
-        if (timed_ && when.duration != 0.0) {
-          invalid("step " + show(n) + " is an action without duration");
-        }
-        when.duration = 0.0;
-      }
-      clock_ = when.time + when.duration;
-      place(n.start);
-      settle();
+    if (timed_) {
+      happenings();
+    } else {
+      one_after_another();
     }
     if (placed_ != events_.size()) {
       for (uint32_t e : waiting_) {
@@ -1174,7 +1265,6 @@ private:
   std::vector<bool> durations_given_;  // by the plan
   bool timed_ = false;     // the plan gives the times
   bool temporal_ = false;  // some action is durative
-  double clock_ = 0.0;     // when the last step ended
   std::optional<double> metric_;
 };
 

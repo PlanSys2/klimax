@@ -117,5 +117,29 @@ TEST(ObjectFluentsTest, TheVerifierFollowsThem)
   EXPECT_FALSE(v.valid);
 }
 
+TEST(ObjectFluentsTest, AFunctionTermAsTheArgumentOfATask)
+{
+  // (go ?t (in ?b)): where the box is when the method is applied
+  std::string domain = kDomain;
+  const std::string written = "(:method deliver-it :parameters (?b - box ?to ?from - place ?t - truck)\n"
+    "  :task (deliver ?b ?to) :precondition (= (in ?b) ?from)\n"
+    "  :ordered-subtasks (and (go ?t ?from)";
+  ASSERT_NE(domain.find(written), std::string::npos);
+  domain.replace(domain.find(written), written.size(),
+    "(:method deliver-it :parameters (?b - box ?to - place ?t - truck)\n"
+    "  :task (deliver ?b ?to)\n"
+    "  :ordered-subtasks (and (go ?t (in ?b))");
+  SolveResult r = solve(domain, problem(kRoads));
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  EXPECT_EQ(r.steps, 6u) << r.plan;
+  EXPECT_NE(r.plan.find("load t1 b1"), std::string::npos) << r.plan;
+  EXPECT_TRUE(verify(domain, problem(kRoads), r.plan).valid);
+  // Not in the initial task network, which has no moment before it
+  const std::string p = "(define (problem p) (:domain d) (:objects a b c - place t1 - truck b1 - box)\n"
+    "(:htn :ordered-subtasks (and (go t1 (in b1))))\n"
+    "(:init (road a b) (= (loc t1) a) (= (in b1) b)))";
+  EXPECT_EQ(solve(domain, p).status, Status::InvalidInput);
+}
+
 }  // namespace
 }  // namespace klimax

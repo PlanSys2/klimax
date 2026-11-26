@@ -51,6 +51,7 @@ public:
 
   kairos::Result<Model> run()
   {
+    function_terms();
     add_precondition_actions();
     auto dm = kairos::sem::analyze_domain(m_.pddl);
     take(dm.diagnostics());
@@ -113,6 +114,72 @@ private:
   std::string name(kairos::Symbol s) const {return std::string(symbols_->name(s));}
 
   // One action per method precondition, checked and grounded by Kairos as any other
+  // A function term as the argument of a subtask, (go ?t (in ?b)), is the value of the fluent
+  // when the method is applied: a new parameter of the method, which its precondition makes
+  // equal to it
+  void function_terms()
+  {
+    size_t fresh = 0;
+    for (Method & method : methods_) {
+      for (Subtask & subtask : method.network.subtasks) {
+        for (ast::TermId & arg : subtask.args) {
+          const ast::Term term = m_.pddl.nodes.terms[arg];
+          if (term.kind != ast::TermKind::Function) {
+            continue;
+          }
+          const auto declared = std::find_if(m_.pddl.functions.begin(), m_.pddl.functions.end(),
+              [&](const ast::FunctionDecl & f) {return f.name == term.name;});
+          if (declared == m_.pddl.functions.end() || declared->type.empty()) {
+            continue;  // reported where the argument is read
+          }
+          ast::TypedName param;
+          param.name = m_.pddl.symbols.intern("?klimax-value-" + std::to_string(fresh++));
+          param.types = declared->type;
+          param.loc = term.loc;
+          param.type_loc = term.loc;
+          method.params.push_back(param);
+          ast::Term variable;
+          variable.kind = ast::TermKind::Variable;
+          variable.name = param.name;
+          variable.loc = term.loc;
+          const ast::TermId value = m_.pddl.nodes.terms.push_back(variable);
+          ast::Expr fluent;
+          fluent.kind = ast::ExprKind::Function;
+          fluent.name = term.name;
+          fluent.args = term.args;
+          fluent.loc = term.loc;
+          ast::Expr same;
+          same.kind = ast::ExprKind::Term;
+          same.term = value;
+          same.loc = term.loc;
+          ast::Formula equal;
+          equal.kind = ast::FormulaKind::Compare;
+          equal.compare = ast::CompareOp::Eq;
+          equal.lhs = m_.pddl.nodes.exprs.push_back(std::move(fluent));
+          equal.rhs = m_.pddl.nodes.exprs.push_back(std::move(same));
+          equal.loc = term.loc;
+          ast::FormulaId condition = m_.pddl.nodes.formulas.push_back(std::move(equal));
+          if (method.durative) {
+            ast::Formula at_start;
+            at_start.kind = ast::FormulaKind::AtStart;
+            at_start.children.push_back(condition);
+            at_start.loc = term.loc;
+            condition = m_.pddl.nodes.formulas.push_back(std::move(at_start));
+          }
+          ast::Formula both;
+          both.kind = ast::FormulaKind::And;
+          both.loc = term.loc;
+          if (method.precondition.valid()) {
+            both.children.push_back(method.precondition);
+          }
+          both.children.push_back(condition);
+          method.precondition = m_.pddl.nodes.formulas.push_back(std::move(both));
+          arg = value;
+        }
+      }
+    }
+  }
+
   void add_precondition_actions()
   {
     m_.user_actions = m_.pddl.actions.size();

@@ -77,10 +77,12 @@ an effect that reads it (or that divides by zero) is not applicable. All the eff
 action read the state before it.
 
 A fluent whose value is an object (`:object-fluents`) may have no value (`undefined`): an
-atom or a comparison that reads it then does not hold. **[decision]** A function term is not
-allowed as an argument of a task (in a method or in the initial task network): HDDL 2.1 does not
-say when it would be evaluated. A parameter of the method bound by its precondition, as
-`(= (in ?b) ?from)`, says it.
+atom or a comparison that reads it then does not hold. **[decision]** A function term as the
+argument of a subtask of a method, `(go ?t (in ?b))`, is the value of the fluent when the method
+is applied, where its precondition is tested: HDDL 2.1 does not say when it would be evaluated,
+and it is what a parameter of the method bound by its precondition, `(= (in ?b) ?from)`, says.
+With no value the method does not apply. It is not allowed in the initial task network, which
+has no such moment.
 
 The metric of the problem (`(:metric minimize e)` or `maximize`) is the value of `e` in the
 state the plan ends in; it does not change which plans are valid. **[decision]** As in the

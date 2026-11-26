@@ -95,7 +95,7 @@ in [baseline.md](baseline.md).
 - Where a resource decides the plan the heuristics do not see it: the seven largest problems
   of Transport_fuel (58 to 82 places) run out of time, and take 0.15 s without the fuel.
 - Of object fluents: two that must differ, or that must be equal in the goal, are not planned
-  with (reported as not supported), and a function term cannot be the argument of a task.
+  with (reported as not supported).
 - The first plan is found without looking at the metric: only the anytime search uses it. With
   actions that cost nothing the cheapest plan is looked for among plans up to about twice as
   long as the first, and is not proved the cheapest. A metric that is not a sum of action

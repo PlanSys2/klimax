@@ -30,9 +30,10 @@ It is developed within the [PlanSys2](https://github.com/PlanSys2) organization,
 Datalog engine, the evaluator and the validator of plans). It does not depend on ROS.
 
 > **Status**: in development, no release yet. Klimax plans HDDL 1.0 problems (total and partial
-> order) and those with the numeric fluents of HDDL 2.1. Of time, the other extension of
-> HDDL 2.1, it plans with durative actions one after another; the rest is the current phase of
-> the [roadmap](docs/roadmap.md).
+> order) and those of HDDL 2.1: numeric fluents, durative actions (also ones that must run at
+> once), timed initial literals, durative methods, orderings between the starts and the ends
+> of tasks, and constraints on durations and on the states of the plan. The
+> [roadmap](docs/roadmap.md) says what of them is checked but not yet planned with.
 
 **How it compares**: on the benchmark of the HTN tracks of IPC 2023, with every plan checked by
 the IPC verifier and the same limits for all, Klimax solves 626 of the 761 total-order problems

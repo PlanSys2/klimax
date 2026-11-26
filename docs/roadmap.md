@@ -13,7 +13,7 @@ in [baseline.md](baseline.md).
 | H3b | done | Python module and Unified Planning engine ([up-klimax](https://github.com/PlanSys2/up-klimax)) | Hierarchical problems solved from Unified Planning, with the plans verified |
 | H4 | done | Anytime search, optimal plans, finer heuristics | Best satisficing score; optimal coverage at least that of the baseline |
 | H5 | done | Numbers | More problems of the numeric HTN benchmark than its authors' planner |
-| H6 | in progress | Time: the whole of HDDL 2.1, with a reference benchmark | Solves the benchmark with validated plans |
+| H6 | done | Time: the whole of HDDL 2.1, with a reference benchmark ([klimax-benchmarks](https://github.com/PlanSys2/klimax-benchmarks)) | Solves the benchmark with validated plans |
 | H7 | planned | Robustness, fuzzing, PlanSys2 plugin, version 1.0.0 | As Kairos |
 
 ## Where it stands
@@ -62,7 +62,20 @@ in [baseline.md](baseline.md).
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans
   and a compiler for hierarchical problems.
 
-## Open in the current phase
+## Open
+
+Of time (H6):
+
+- The search with the start and the end of each durative action apart does not look at
+  durations: it finds an order of starts and ends, and Kairos then gives it times or not.
+- Timed initial literals together with actions that must overlap; Kairos' scheduler does not
+  read timed initial literals, so plans with them stay with one action after another.
+- Planning with the constraints on time points, on durations and on states that the verifier
+  checks and the searches do not (all but `before` and the end of `between`).
+- The reference benchmark has the temporal level only: numbers (L2) and constraints (L4) are
+  to come.
+
+From before:
 
 - A heuristic for the search that does not ground: it is depth first in the order of the
   domain, and most of the total-order problems whose ground form is too large (Snake,

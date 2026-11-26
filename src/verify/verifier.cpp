@@ -1147,6 +1147,127 @@ private:
     }
   }
 
+  // The timed initial literals of the problem, in the order of time
+  struct Literal
+  {
+    double time;
+    bool add;
+    val::Key atom;
+  };
+
+  void timed_literals()
+  {
+    val::Bindings none;
+    const val::Evaluator::Ctx c{state_};
+    for (const ast::InitItem & item : m_.problem.init) {
+      if (!item.time) {
+        if (item.negated) {
+          invalid("unsupported: a negative literal in the initial state");
+        }
+        continue;
+      }
+      const auto predicate = item.kind == ast::InitItem::Kind::Fact ?
+        m_.domain.predicates.find(m_.problem.symbols.name(item.name)) : std::nullopt;
+      if (!predicate) {
+        invalid("unsupported: timed initial values of fluents");
+      }
+      val::Key key{predicate->value()};
+      for (ast::TermId a : item.args) {
+        key.push_back(world_.problem_eval.object_of(a, c, none));
+      }
+      literals_.push_back(Literal{*item.time, !item.negated, std::move(key)});
+    }
+    std::stable_sort(literals_.begin(), literals_.end(),
+      [](const Literal & a, const Literal & b) {return a.time < b.time;});
+  }
+
+  // The literals up to a time take place; true if some did
+  bool literals_until(double time)
+  {
+    bool some = false;
+    for (; next_literal_ < literals_.size() && literals_[next_literal_].time <= time;
+      ++next_literal_)
+    {
+      const Literal & l = literals_[next_literal_];
+      if (l.add) {
+        state_.atoms.insert(l.atom);
+      } else {
+        state_.atoms.erase(l.atom);
+      }
+      some = true;
+    }
+    if (some) {
+      state_.changed();
+    }
+    return some;
+  }
+
+  // A plan without times in a problem with timed initial literals: each step when the one
+  // before has ended, or after a literal if it cannot start before. Nothing else takes place
+  // while a step runs but the literals
+  void one_after_another_waiting()
+  {
+    double clock = 0.0;
+    for (uint32_t index : sequence_) {
+      const Node & n = nodes_[index];
+      Timed & when = times_[n.position];
+      const bool lasts = m_.tasks[n.task].durative;
+      // When it may start: now, or once a literal has taken place
+      std::vector<double> candidates{n.position == 0 ? 0.0 : clock + kEpsilon};
+      for (size_t l = next_literal_; l < literals_.size(); ++l) {
+        if (literals_[l].time + kEpsilon > candidates.back()) {
+          candidates.push_back(literals_[l].time + kEpsilon);
+        }
+      }
+      bool done = false;
+      std::string why;
+      for (size_t c = 0; c < candidates.size() && !done; ++c) {
+        when.time = candidates[c];
+        if (literals_until(when.time - kEpsilon)) {
+          settle();
+        }
+        if (events_[n.start].pending != 0) {
+          why = "step " + show(n) + " comes too early: " + blocker(n.start);
+          continue;
+        }
+        const val::State before = state_;
+        const size_t literal = next_literal_;
+        try {
+          if (lasts) {
+            const ast::DurativeAction & a = m_.pddl.durative_actions[m_.tasks[n.task].action];
+            Running running = begin(a, n, when);
+            // A literal while it runs may break what must hold over all of it
+            while (next_literal_ < literals_.size() &&
+              literals_[next_literal_].time < when.time + when.duration)
+            {
+              check(a, n, running, val::Phase::Invariant, "over all");
+              literals_until(literals_[next_literal_].time);
+            }
+            check(a, n, running, val::Phase::Invariant, "over all");
+            literals_until(when.time + when.duration - kEpsilon);
+            finish(a, n, running);
+          } else {
+            instant(n, when);
+          }
+          done = true;
+        } catch (const Invalid & e) {
+          why = e.reason;
+          state_ = before;
+          next_literal_ = literal;
+        }
+      }
+      if (!done) {
+        invalid(why);
+      }
+      clock = when.time + when.duration;
+      if (lasts) {
+        place(n.start);
+      }
+      place(n.end);
+      settle();
+    }
+  }
+
   // A plan with times: the starts and the ends of its steps in the order of time; at the same
   // time the ends first, then as the plan lists the steps. What must hold while an action
   // runs, and the rules on what happens at once, are left to Kairos' validator
@@ -1156,37 +1277,47 @@ private:
     struct Happening
     {
       double time;
-      bool start;
+      int kind;  // 0: an end, 1: the literals of the time, 2: a start
       uint32_t position;
     };
     std::vector<Happening> all;
     for (uint32_t index : sequence_) {
       const Node & n = nodes_[index];
       const Timed & when = times_[n.position];
-      all.push_back(Happening{when.time, true, n.position});
+      all.push_back(Happening{when.time, 2, n.position});
       if (m_.tasks[n.task].durative) {
         temporal_ = true;
-        all.push_back(Happening{when.time + when.duration, false, n.position});
+        all.push_back(Happening{when.time + when.duration, 0, n.position});
       }
     }
+    for (const Literal & l : literals_) {
+      temporal_ = true;
+      all.push_back(Happening{l.time, 1, 0});
+    }
     std::stable_sort(all.begin(), all.end(), [](const Happening & a, const Happening & b) {
-        return a.time != b.time ? a.time < b.time : a.start < b.start;
+        return a.time != b.time ? a.time < b.time : a.kind < b.kind;
       });
     std::vector<Running> running(sequence_.size());
     for (const Happening & h : all) {
+      if (h.kind == 1) {
+        if (literals_until(h.time)) {
+          settle();
+        }
+        continue;
+      }
       const Node & n = nodes_[sequence_[h.position]];
       Timed & when = times_[n.position];
       if (!m_.tasks[n.task].durative) {
         starts(n);
         instant(n, when);
-      } else if (h.start) {
+      } else if (h.kind == 2) {
         starts(n);
         running[h.position] = begin(
           m_.pddl.durative_actions[m_.tasks[n.task].action], n, when);
       } else {
         finish(m_.pddl.durative_actions[m_.tasks[n.task].action], n, running[h.position]);
       }
-      place(h.start && m_.tasks[n.task].durative ? n.start : n.end);
+      place(h.kind == 2 && m_.tasks[n.task].durative ? n.start : n.end);
       settle();
     }
   }
@@ -1199,13 +1330,9 @@ private:
       is_leaf_[nodes_[n].end] = true;
     }
     val::Bindings env;
-    for (const ast::InitItem & item : m_.problem.init) {
-      if (item.time || item.negated) {
-        invalid("unsupported: timed initial literals");
-      }
-    }
     try {
       world_.initial_state(state_);
+      timed_literals();
     } catch (const val::EvalError & e) {
       invalid("unsupported: this initial state: " + e.message);
     }
@@ -1219,6 +1346,9 @@ private:
     settle();
     if (timed_) {
       happenings();
+    } else if (!literals_.empty()) {
+      temporal_ = true;
+      one_after_another_waiting();
     } else {
       one_after_another();
     }
@@ -1305,6 +1435,8 @@ private:
   static constexpr double kEpsilon = 0.001;  // between a step and the next, as in PDDL 2.1
   std::vector<Timed> times_;           // of the actions, in plan order
   std::vector<bool> durations_given_;  // by the plan
+  std::vector<Literal> literals_;  // the timed initial literals, in the order of time
+  size_t next_literal_ = 0;        // the first that has not taken place
   bool timed_ = false;     // the plan gives the times
   bool temporal_ = false;  // some action is durative
   std::optional<double> metric_;

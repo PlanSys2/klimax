@@ -16,6 +16,7 @@
 #ifndef KLIMAX__TDG__COMPRESS_HPP_
 #define KLIMAX__TDG__COMPRESS_HPP_
 
+#include <functional>
 #include <string>
 
 #include "normalize/task.hpp"
@@ -41,6 +42,22 @@ namespace klimax::tdg
  * reads later than it changes, or a conditional effect at end.
  */
 std::string compress(kairos::lifted::Task & task);
+
+/// The numeric fluent that says when the next step of a plan may start (see clock()).
+inline constexpr const char * kClock = "klimax-clock";
+/// Between a step and the next, as PDDL 2.1 asks of what happens at different times.
+inline constexpr double kEpsilon = 0.001;
+
+/**
+ * @brief For a task with timed initial literals, before compress(): a clock that every step
+ * of a plan moves on by what it lasts (and kEpsilon), so that with one action after another
+ * its value is when the next may start. `step` says whether an action is a step of the plan
+ * (not the test of a method's precondition).
+ *
+ * The reason, and the task as it was, if a duration cannot be read.
+ */
+std::string clock(
+  kairos::lifted::Task & task, const std::function<bool(const std::string &)> & step);
 
 }  // namespace klimax::tdg
 

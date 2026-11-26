@@ -160,11 +160,56 @@ std::string one(const lifted::DurativeAction & d, lifted::Action & a)
 
 }  // namespace
 
+std::string clock(
+  kairos::lifted::Task & task, const std::function<bool(const std::string &)> & step)
+{
+  const kairos::sem::FunctionId id(static_cast<uint32_t>(task.function_names.size()));
+  auto moves = [&](lifted::Expr by, lifted::Timing timing) {
+      lifted::Effect e;
+      e.kind = lifted::Effect::Kind::Numeric;
+      e.timing = timing;
+      e.function = id;
+      e.op = kairos::ast::AssignOp::Increase;
+      lifted::Expr pause;
+      pause.value = kEpsilon;
+      e.value.op = lifted::ExprOp::Add;
+      e.value.children.push_back(std::move(by));
+      e.value.children.push_back(std::move(pause));
+      return e;
+    };
+  std::vector<lifted::Effect> durative;
+  for (const lifted::DurativeAction & d : task.durative_actions) {
+    // What it lasts: what its duration is equal to, or else the least it allows
+    const lifted::DurationConstraint * chosen = nullptr;
+    for (const lifted::DurationConstraint & c : d.duration) {
+      if (c.op == lifted::CompareOp::Eq || (chosen == nullptr && c.op == lifted::CompareOp::Ge)) {
+        chosen = &c;
+      }
+    }
+    if (chosen == nullptr || uses_duration(chosen->value)) {
+      return "durative action " + d.name + ": a duration with no value or lower bound";
+    }
+    durative.push_back(moves(chosen->value, lifted::Timing::Start));
+  }
+  task.function_names.push_back(kClock);
+  task.numeric.push_back(true);
+  task.function_params.emplace_back();
+  lifted::InitFluent start;
+  start.function = id;
+  task.init_fluents.push_back(start);
+  for (size_t i = 0; i < task.durative_actions.size(); ++i) {
+    task.durative_actions[i].effects.push_back(std::move(durative[i]));
+  }
+  for (lifted::Action & a : task.actions) {
+    if (step(a.name)) {
+      a.effects.push_back(moves(lifted::Expr{}, lifted::Timing::Instant));
+    }
+  }
+  return "";
+}
+
 std::string compress(kairos::lifted::Task & task)
 {
-  if (!task.timed_events.empty()) {
-    return "timed initial literals";
-  }
   std::vector<lifted::Action> made;
   for (const lifted::DurativeAction & d : task.durative_actions) {
     made.emplace_back();

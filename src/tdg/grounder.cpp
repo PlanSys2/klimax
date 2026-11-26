@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <map>
 #include <memory>
+#include <set>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -32,6 +33,7 @@
 #include "hddl/split.hpp"
 #include "tdg/compress.hpp"
 #include "tdg/object_fluents.hpp"
+#include "tdg/timed.hpp"
 #include "normalize/normalizer.hpp"
 
 namespace klimax::tdg
@@ -82,7 +84,19 @@ public:
       };
     lifted_ = kairos::lifted::normalize(m_.pddl, m_.domain, m_.problem, m_.objects);
     // Time: each durative action as one step, the plan timed afterwards (check.cpp)
-    if (std::string why = compress(lifted_); !why.empty()) {
+    std::string why;
+    if (!lifted_.timed_events.empty()) {
+      // With timed initial literals every step moves a clock on (tdg/timed.hpp)
+      std::set<std::string> steps;
+      for (uint32_t i = 0; i < m_.user_actions; ++i) {
+        steps.insert(action_name(i));
+      }
+      why = clock(lifted_, [&](const std::string & name) {return steps.count(name) != 0;});
+    }
+    if (why.empty()) {
+      why = compress(lifted_);
+    }
+    if (!why.empty()) {
       return kairos::Result<Problem>::failure(
         {kairos::Diagnostic::error("ground.unsupported", "not planned with yet: " + why)});
     }
@@ -161,6 +175,11 @@ public:
       // Object fluents as atoms, for searches and heuristics that know nothing else. Where
       // that cannot be done they stay, and the searches refuse the problem
       object_fluents_as_atoms(p_.pddl, m_);
+      if (std::string unsupported = timed_literals(p_.pddl); !unsupported.empty()) {
+        return kairos::Result<Problem>::failure(
+          {kairos::Diagnostic::error("ground.unsupported", "not planned with yet: " +
+            unsupported)});
+      }
       p_.stats.kairos_actions = p_.pddl.actions.size();
       p_.stats.kairos_ms = since() - p_.stats.datalog_ms;
       if (trace_) {
@@ -404,6 +423,19 @@ private:
         row.push_back(o.value());
       }
       prog_.add_fact(fact_[predicate.index()], row);
+    }
+    // What a timed initial literal adds holds at some time: reachable, and not static
+    for (const kairos::lifted::TimedEvent & e : lifted_.timed_events) {
+      if (e.fact) {
+        changes[e.fact->first.index()] = true;
+        if (!e.negated) {
+          Row row;
+          for (sem::ObjectId o : e.fact->second) {
+            row.push_back(o.value());
+          }
+          prog_.add_fact(fact_[e.fact->first.index()], row);
+        }
+      }
     }
     for (size_t q = 0; q < predicates; ++q) {
       if (!changes[q]) {

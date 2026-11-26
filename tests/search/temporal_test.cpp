@@ -116,11 +116,8 @@ const char * kStudy = "(define (problem p) (:domain d)\n"
 
 TEST(TemporalTest, WhatIsNotPlannedYetIsSaid)
 {
-  // Timed initial literals
-  SolveResult r = solve(kDomain, problem("(at 5 (hot))"));
-  EXPECT_EQ(r.status, Status::Unsupported) << r.plan;
   // Actions that must overlap: "no plan" would be false
-  r = solve(light(":subtasks"), kStudy);
+  SolveResult r = solve(light(":subtasks"), kStudy);
   EXPECT_EQ(r.status, Status::Unsupported) << r.message << r.plan;
   EXPECT_FALSE(r.message.empty());
 }
@@ -171,6 +168,61 @@ TEST(TemporalTest, ActionsOverlapWhereTheHierarchyAllows)
   ASSERT_EQ(r.status, Status::Solved) << r.message;
   ASSERT_TRUE(r.makespan.has_value());
   EXPECT_NEAR(*r.makespan, 10.0, 1e-9) << r.plan;
+}
+
+// Sites that can be looked at only while they are visible, which the problem says with timed
+// initial literals
+const char * kSites =
+  "(define (domain d)\n"
+  " (:requirements :typing :hierarchy :durative-actions :timed-initial-literals)\n"
+  " (:types site)\n"
+  " (:predicates (visible ?s - site) (seen ?s - site))\n"
+  " (:task observe :parameters (?s - site))\n"
+  " (:method m :parameters (?s - site) :task (observe ?s) :ordered-subtasks (and (look ?s)))\n"
+  " (:durative-action look :parameters (?s - site) :duration (= ?duration 2)\n"
+  "  :condition (and (over all (visible ?s))) :effect (at end (seen ?s))))";
+
+std::string sites(const std::string & b_until)
+{
+  return "(define (problem p) (:domain d) (:objects a b - site)\n"
+         "(:htn :ordered-subtasks (and (observe a) (observe b)))\n"
+         "(:init (at 10 (visible a)) (at 20 (not (visible a))) (visible b)\n"
+         " (at " + b_until + " (not (visible b))))\n"
+         "(:goal (and (seen a) (seen b))))";
+}
+
+TEST(TemporalTest, AStepWaitsForATimedInitialLiteral)
+{
+  // a is visible from 10: looking at it starts then, and b is looked at afterwards
+  SolveResult r = solve(kSites, sites("30"));
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  EXPECT_NE(r.plan.find(" 10.001: (look a) [2.000]"), std::string::npos) << r.plan;
+  ASSERT_TRUE(r.makespan.has_value());
+  EXPECT_NEAR(*r.makespan, 14.0, 0.01) << r.plan;
+  EXPECT_TRUE(verify(kSites, sites("30"), r.plan).valid);
+  // By then b is no longer visible if it stops being so at 13: no plan in that order
+  r = solve(kSites, sites("13"));
+  EXPECT_NE(r.status, Status::Solved) << r.plan;
+}
+
+TEST(TemporalTest, TheVerifierFollowsTimedInitialLiterals)
+{
+  auto plan = [](const std::string & a, const std::string & b) {
+      return "==>\n1 " + a + ": (look a) [2]\n2 " + b + ": (look b) [2]\nroot 3 4\n"
+             "3 observe a -> m 1\n4 observe b -> m 2\n<==\n";
+    };
+  EXPECT_TRUE(verify(kSites, sites("30"), plan("11", "14")).valid);
+  // Before a is visible, and while it stops being so
+  EXPECT_FALSE(verify(kSites, sites("30"), plan("5", "14")).valid);
+  EXPECT_FALSE(verify(kSites, sites("30"), plan("19", "22")).valid);
+  // b after it stops being visible
+  EXPECT_FALSE(verify(kSites, sites("30"), plan("11", "29")).valid);
+  // Without times the verifier waits as the plan needs
+  VerifyResult v = verify(kSites, sites("30"),
+      "==>\n1 look a\n2 look b\nroot 3 4\n3 observe a -> m 1\n4 observe b -> m 2\n<==\n");
+  EXPECT_TRUE(v.valid) << v.reason;
+  ASSERT_TRUE(v.makespan.has_value());
+  EXPECT_NEAR(*v.makespan, 14.002, 1e-9);
 }
 
 }  // namespace

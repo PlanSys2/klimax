@@ -239,12 +239,13 @@ TEST(VerifierTest, Numbers)
 TEST(VerifierTest, UnsupportedIsNeverAccepted)
 {
   auto d = hddl::parse_domain(
-    "(define (domain d) (:requirements :hierarchy :timed-initial-literals) (:predicates (p))\n"
+    "(define (domain d) (:requirements :hierarchy :timed-initial-literals :numeric-fluents)\n"
+    " (:predicates (p)) (:functions (f))\n"
     " (:task t :parameters ())\n"
     " (:method m :parameters () :task (t) :ordered-subtasks (a))\n"
     " (:action a :parameters () :effect (p)))", "d.hddl");
   auto p = hddl::parse_problem(
-    "(define (problem p) (:domain d) (:htn :subtasks (t)) (:init (at 5 (p))))", "p.hddl");
+    "(define (problem p) (:domain d) (:htn :subtasks (t)) (:init (at 5 (= (f) 3))))", "p.hddl");
   ASSERT_TRUE(d.ok() && p.ok());
   auto m = hddl::analyze(std::move(d).value(), std::move(p).value());
   ASSERT_TRUE(m.ok());

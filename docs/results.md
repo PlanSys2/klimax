@@ -163,9 +163,10 @@ its solver, since it is run from Python (below), which takes half a second more.
 
 ## Time
 
-A first measure, on forty problems generated for it (four families of ten, of growing size)
-while the reference benchmark of the [roadmap](roadmap.md) is not published: its generators
-will be. Each family has durative actions and tasks that the initial network does not order:
+A first measure, on the forty problems of
+[klimax-benchmarks](https://github.com/PlanSys2/klimax-benchmarks) (four families of ten, of
+growing size, with their generators and the harness that ran this). Each family has durative
+actions and tasks that the initial network does not order:
 
 - **Transport**: trucks deliver packages over roads of some length.
 - **Satellite**: a satellite takes images of sites that are visible only for a while (timed

@@ -16,6 +16,8 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <algorithm>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -32,7 +34,9 @@ namespace
 void print_usage(std::ostream & out)
 {
   out << "Usage: klimax DOMAIN PROBLEM [--timeout SECONDS] [--anytime] [--no-verify] [--tree]\n"
+      << "              [--timeline]\n"
       << "       klimax --tree DOMAIN PROBLEM PLAN\n"
+      << "       klimax --timeline DOMAIN PROBLEM PLAN\n"
       << "       klimax --check DOMAIN PROBLEM\n"
       << "       klimax --verify DOMAIN PROBLEM PLAN\n"
       << "       klimax --ground DOMAIN PROBLEM [SECONDS]\n"
@@ -47,6 +51,9 @@ void print_usage(std::ostream & out)
       << "  --tree    write the plan as a tree, each task with its method and what it became\n"
       << "            below it, and the actions numbered in the order of execution; with a\n"
       << "            PLAN, that plan (which is verified first)\n"
+      << "  --timeline  write the plan as a chart of time, a line per action with a bar from\n"
+      << "            its start to its end: actions that run at once have bars one above\n"
+      << "            the other. Also after DOMAIN PROBLEM, or with a PLAN as --tree\n"
       << "  --check   read the domain and the problem and report every error\n"
       << "  --verify  check a plan in the format of the IPC HTN tracks\n"
       << "  --ground  ground the problem and print its size\n";
@@ -200,11 +207,107 @@ void print_tree(
   }
 }
 
+// A plan with times as a chart: a line per action, in the order they start, with a bar from
+// its start to its end on a common scale of time, so that actions that run at once are seen
+// one above the other. The last column says how many others run during each
+void print_timeline(
+  const std::vector<klimax::PlanStep> & steps, const std::vector<std::string> & sequence,
+  const std::string & plan)
+{
+  const bool colour = isatty(STDOUT_FILENO) != 0 && std::getenv("NO_COLOR") == nullptr;
+  struct Row
+  {
+    std::string name;
+    double from = 0.0;
+    double to = 0.0;
+    size_t place = 0;
+  };
+  std::unordered_map<std::string, size_t> place;
+  for (size_t i = 0; i < sequence.size(); ++i) {
+    place.emplace(sequence[i], i + 1);
+  }
+  std::unordered_map<std::string, std::string> names;
+  for (const klimax::PlanStep & s : steps) {
+    if (s.primitive) {
+      std::string name = s.task;
+      for (const std::string & a : s.args) {
+        name += " " + a;
+      }
+      names.emplace(s.id, std::move(name));
+    }
+  }
+  std::vector<Row> rows;
+  for (size_t at = 0; at < plan.size(); ) {
+    const size_t end = std::min(plan.find('\n', at), plan.size());
+    const std::string line = plan.substr(at, end - at);
+    at = end + 1;
+    char id[64];
+    double time = 0.0;
+    const size_t open = line.rfind('[');
+    if (open != std::string::npos && std::sscanf(line.c_str(), "%63s %lf:", id, &time) == 2 &&
+      names.count(id) != 0)
+    {
+      rows.push_back(Row{names[id], time, time + std::strtod(line.c_str() + open + 1, nullptr),
+          place[id]});
+    }
+  }
+  if (rows.empty()) {
+    std::cout << "The plan has no times: its actions are executed one after another, in the "
+      "order of the plan.\n";
+    return;
+  }
+  std::stable_sort(rows.begin(), rows.end(),
+    [](const Row & a, const Row & b) {return a.from < b.from;});
+  double makespan = 0.0;
+  size_t widest = 0;
+  for (const Row & r : rows) {
+    makespan = std::max(makespan, r.to);
+    widest = std::max(widest, r.name.size());
+  }
+  constexpr size_t kWidth = 60;
+  const size_t digits = std::to_string(rows.size()).size();
+  auto column = [&](double t) {
+      return makespan <= 0.0 ? size_t{0} :
+             std::min(kWidth - 1, static_cast<size_t>(t / makespan * static_cast<double>(kWidth)));
+    };
+  size_t at_once = 0;
+  for (const Row & r : rows) {
+    // The others that run while it does (two that only touch at an instant do not)
+    size_t others = 0;
+    for (const Row & o : rows) {
+      others += &o != &r && o.from < r.to && r.from < o.to;
+    }
+    at_once = std::max(at_once, others);
+    std::string number = std::to_string(r.place);
+    number.insert(0, digits - number.size(), ' ');
+    std::string name = r.name;
+    name.append(widest - name.size(), ' ');
+    const size_t first = column(r.from);
+    const size_t last = r.to > r.from ? std::max(first, column(r.to - 1e-9)) : first;
+    std::string bar;
+    for (size_t c = 0; c < kWidth; ++c) {
+      bar += c < first || c > last ? "·" : r.to > r.from ? "█" : "◆";
+    }
+    char when[96];
+    std::snprintf(when, sizeof(when), "%10.3f → %-10.3f", r.from, r.to);
+    std::cout << (colour ? "\x1b[36m" : "") << number << (colour ? "\x1b[0m" : "") << "  "
+              << name << "  " << (colour ? (others > 0 ? "\x1b[33m" : "\x1b[32m") : "") << bar
+              << (colour ? "\x1b[0m" : "") << "  " << when;
+    if (others > 0) {
+      std::cout << " with " << others << (others == 1 ? " other" : " others");
+    }
+    std::cout << "\n";
+  }
+  std::cout << "\nmakespan " << makespan << "; "
+            << (at_once == 0 ? "no two actions run at once" :
+    "up to " + std::to_string(at_once + 1) + " actions at once") << "\n";
+}
+
 // Exit codes: 0 solved, 1 errors in the input, 2 bad usage, 10 unsolvable, 11 out of time,
 // 12 not supported
 int solve(
   const char * domain_path, const char * problem_path, double seconds, bool anytime, bool verify,
-  bool tree)
+  bool tree, bool timeline)
 {
   auto domain = read_file(domain_path);
   auto problem = read_file(problem_path);
@@ -215,7 +318,7 @@ int solve(
   options.seconds = seconds;
   options.anytime = anytime;
   options.verify = verify;
-  options.decomposition = tree;
+  options.decomposition = tree || timeline;
   if (anytime) {
     options.on_plan = [](const std::string &, size_t steps) {
         std::cerr << "; plan of " << steps << " actions\n";
@@ -241,7 +344,12 @@ int solve(
     case klimax::Status::Solved:
       if (tree) {
         print_tree(r.steps_of_plan, r.sequence, r.roots, r.plan);
-      } else {
+      }
+      if (timeline) {
+        std::cout << (tree ? "\n" : "");
+        print_timeline(r.steps_of_plan, r.sequence, r.plan);
+      }
+      if (!tree && !timeline) {
         std::cout << r.plan;
       }
       return 0;
@@ -254,7 +362,8 @@ int solve(
 
 // Exit codes: 0 valid plan, 1 invalid plan or errors in the input, 2 bad usage
 int verify(
-  const char * domain_path, const char * problem_path, const char * plan_path, bool tree = false)
+  const char * domain_path, const char * problem_path, const char * plan_path, bool tree = false,
+  bool timeline = false)
 {
   auto domain = read_file(domain_path);
   auto problem = read_file(problem_path);
@@ -263,7 +372,7 @@ int verify(
     return 2;
   }
   klimax::VerifyResult r = klimax::verify(
-    *domain, *problem, *plan, domain_path, problem_path, tree);
+    *domain, *problem, *plan, domain_path, problem_path, tree || timeline);
   for (const klimax::Diagnostic & d : r.diagnostics) {
     if (d.severity == klimax::Severity::Error) {
       std::cerr << d.rendered << "\n";
@@ -275,6 +384,10 @@ int verify(
   }
   if (tree) {
     print_tree(r.steps_of_plan, r.sequence, r.roots, *plan);
+    return 0;
+  }
+  if (timeline) {
+    print_timeline(r.steps_of_plan, r.sequence, *plan);
     return 0;
   }
   std::cout << "Plan verification result: true\n";
@@ -297,6 +410,7 @@ int main(int argc, char ** argv)
     bool anytime = false;
     bool verify = true;
     bool tree = false;
+    bool timeline = false;
     for (int i = 3; i < argc; ++i) {
       const std::string_view arg = argv[i];
       if (arg == "--timeout" && i + 1 < argc) {
@@ -307,12 +421,14 @@ int main(int argc, char ** argv)
         verify = false;
       } else if (arg == "--tree") {
         tree = true;
+      } else if (arg == "--timeline") {
+        timeline = true;
       } else {
         print_usage(std::cerr);
         return 2;
       }
     }
-    return solve(argv[1], argv[2], seconds, anytime, verify, tree);
+    return solve(argv[1], argv[2], seconds, anytime, verify, tree, timeline);
   }
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];
@@ -344,12 +460,12 @@ int main(int argc, char ** argv)
       }
       return verify(argv[i + 1], argv[i + 2], argv[i + 3]);
     }
-    if (arg == "--tree") {
+    if (arg == "--tree" || arg == "--timeline") {
       if (i + 4 != argc) {
-        std::cerr << "klimax: --tree takes a domain, a problem and a plan\n";
+        std::cerr << "klimax: " << arg << " takes a domain, a problem and a plan\n";
         return 2;
       }
-      return verify(argv[i + 1], argv[i + 2], argv[i + 3], true);
+      return verify(argv[i + 1], argv[i + 2], argv[i + 3], arg == "--tree", arg == "--timeline");
     }
     if (arg == "--help" || arg == "-h") {
       print_usage(std::cout);

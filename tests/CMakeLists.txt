@@ -75,6 +75,16 @@ if(KLIMAX_BUILD_CLI)
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.hddl
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.plan)
   set_tests_properties(cli_tree_of_a_plan PROPERTIES PASS_REGULAR_EXPRESSION "└── +[0-9]+  ")
+  add_test(NAME cli_timeline_without_times COMMAND klimax_cli
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl --timeline)
+  set_tests_properties(cli_timeline_without_times PROPERTIES
+    PASS_REGULAR_EXPRESSION "The plan has no times")
+  add_test(NAME cli_timeline COMMAND klimax_cli
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/workers/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/workers/two.hddl --timeline)
+  set_tests_properties(cli_timeline PROPERTIES
+    PASS_REGULAR_EXPRESSION "with 1 other\n.*makespan 5; up to 2 actions at once")
   add_test(NAME cli_check_missing_file COMMAND klimax_cli --check nowhere.hddl nowhere.hddl)
   set_tests_properties(cli_check_missing_file PROPERTIES WILL_FAIL ON)
 endif()

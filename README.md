@@ -64,6 +64,7 @@ klimax DOMAIN PROBLEM [--timeout S]           # the plan and its decomposition, 
 klimax DOMAIN PROBLEM --timeout S --anytime   # go on to better plans; says if none is better
 klimax DOMAIN PROBLEM --tree                  # the plan as a tree, to read it
 klimax --tree DOMAIN PROBLEM PLAN             # a plan in the IPC format, verified, as a tree
+klimax DOMAIN PROBLEM --timeline              # a plan with times as a chart: what runs at once
 klimax DOMAIN PROBLEM --no-verify             # skip the check of the plan before writing it
 klimax --check DOMAIN PROBLEM                 # read the input and report every error
 klimax --verify DOMAIN PROBLEM PLAN           # check a plan in the format of the IPC HTN tracks

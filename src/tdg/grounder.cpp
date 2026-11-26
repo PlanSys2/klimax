@@ -72,6 +72,7 @@ public:
   Grounder(const Model & model, kairos::Budget * budget)
   : owned_(model), m_(owned_), budget_(budget)
   {
+    hddl::test_before(owned_);
     split_ = hddl::split_parameters(owned_);
   }
 

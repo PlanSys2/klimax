@@ -222,6 +222,13 @@ private:
         result.message = "durative actions, derived predicates or trajectory constraints";
         return;
       }
+      // This search reads the model as written, where nothing tests them
+      if (!m_.initial.states.empty() || std::any_of(m_.methods.begin(), m_.methods.end(),
+        [](const hddl::MethodInfo & method) {return !method.network.states.empty();}))
+      {
+        result.message = "constraints on the states of the plan";
+        return;
+      }
       prepare();
       initial_state();
       started_ = true;

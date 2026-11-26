@@ -47,6 +47,7 @@ inline constexpr uint32_t kNone = std::numeric_limits<uint32_t>::max();
 struct Invalid
 {
   std::string reason;
+  bool constraint = false;  // a constraint of HDDL 2.1 on the states of the plan does not hold
 };
 
 [[noreturn]] inline void invalid(std::string reason) {throw Invalid{std::move(reason)};}

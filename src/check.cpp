@@ -606,6 +606,13 @@ SolveResult solve(
             }
             break;
           }
+          if (!checked.valid && checked.constraint) {
+            result.status = Status::Unsupported;
+            result.message = "the plan found does not meet a constraint on the states of the "
+              "plan (" + checked.reason + "): those are checked, not planned with yet";
+            result.plan.clear();
+            break;
+          }
           if (!checked.valid && (temporal || checked.only_times)) {
             // Found taking each durative action as one step: where that is not enough (an
             // action needs what another gives only while it runs) the plan is not one

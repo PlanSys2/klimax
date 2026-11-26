@@ -1110,6 +1110,7 @@ private:
       }
     }
     conditions();
+    observe_all();
   }
 
   // The values of the parameters of the method of a node, by name
@@ -1207,13 +1208,235 @@ private:
     }
   }
 
-  // An action starts: so do the tasks above it that had not
+  // An action starts: so do the tasks above it that had not. Called in the state before it
   void started(const Node & leaf)
   {
+    // What must hold just before each of them
+    uint32_t below = static_cast<uint32_t>(&leaf - nodes_.data());
+    for (bool first = true; ; first = false) {
+      const Node & n = nodes_[below];
+      if (!first && n.began) {
+        break;
+      }
+      const uint32_t up = n.parent;
+      const hddl::Network & net = up == kNone ? m_.initial : m_.methods[nodes_[up].method].network;
+      const std::vector<uint32_t> & steps = up == kNone ? roots_ : nodes_[up].children;
+      for (const hddl::StateConstraint & c : net.states) {
+        if (c.kind == hddl::ConstraintKind::Before && steps[c.a] == below &&
+          !state_holds(up, c.first))
+        {
+          broken(up, "before " + show(n));
+        }
+      }
+      if (up == kNone) {
+        break;
+      }
+      below = up;
+    }
     for (uint32_t up = leaf.parent; up != kNone && !nodes_[up].began; up = nodes_[up].parent) {
       nodes_[up].began = true;
       if (m_.methods[nodes_[up].method].condition.valid()) {
         lasting_.push_back(up);
+      }
+      if (!m_.methods[nodes_[up].method].network.states.empty()) {
+        open_scope(up);
+      }
+    }
+  }
+
+  // --- Constraints on the states of the plan (HDDL 2.1) ----------------------------------------
+  // Those of a method are about the states from the start of its task to its end; those of
+  // the initial task network, about the whole plan. The states are those after each thing
+  // that takes place, and the one the task starts in.
+
+  // What is known so far of a constraint
+  struct Track
+  {
+    bool done = false;     // After: checked. HoldAfter, HoldDuring: its time has come
+    bool seen = false;     // Sometime, Within: it held. SometimeBefore: the second did
+    bool was = false;      // what the condition was in the state before
+    int times = 0;         // AtMostOnce: times it has become true
+    bool pending = false;  // SometimeAfter, AlwaysWithin: the second is awaited
+    double since = 0.0;    // AlwaysWithin: since when
+  };
+
+  struct Scope
+  {
+    uint32_t node = kNone;  // kNone: the initial task network
+    double from = 0.0;
+    std::vector<Track> tracks;
+  };
+
+  const hddl::Network & network(const Scope & s) const
+  {
+    return s.node == kNone ? m_.initial : m_.methods[nodes_[s.node].method].network;
+  }
+
+  // A condition of a constraint of a node (kNone: of the initial network), in this state
+  bool state_holds(uint32_t node, ast::FormulaId formula)
+  {
+    val::Bindings env;
+    if (node == kNone) {
+      return holds(world_.problem_eval, formula, env);
+    }
+    env = parameters(nodes_[node]);
+    return holds(world_.domain_eval, formula, env);
+  }
+
+  [[noreturn]] void broken(uint32_t node, const std::string & what)
+  {
+    throw Invalid{(node == kNone ? std::string("the initial task network") :
+              "step " + show(nodes_[node]) + ", method " + m_.methods[nodes_[node].method].name) +
+            ": its constraint (" + what + ") does not hold", true};
+  }
+
+  // The task of a node starts (the plan, for kNone): in this state, before anything of it
+  void open_scope(uint32_t node)
+  {
+    Scope scope;
+    scope.node = node;
+    scope.from = now_;
+    scope.tracks.resize(network(scope).states.size());
+    const std::vector<hddl::StateConstraint> & states = network(scope).states;
+    for (size_t i = 0; i < states.size(); ++i) {
+      if (states[i].kind == hddl::ConstraintKind::AtStart && !state_holds(node, states[i].first)) {
+        broken(node, "at start");
+      }
+    }
+    scopes_.push_back(std::move(scope));
+    observe(scopes_.back(), true);
+  }
+
+  bool has_ended(uint32_t node) const {return events_[nodes_[node].end].placed;}
+
+  bool has_begun(uint32_t node) const
+  {
+    return nodes_[node].primitive ? events_[nodes_[node].start].placed : nodes_[node].began;
+  }
+
+  // The constraints of a scope in the state now. `first`: the state its task starts in
+  void observe(Scope & scope, bool first)
+  {
+    using Kind = hddl::ConstraintKind;
+    const std::vector<hddl::StateConstraint> & states = network(scope).states;
+    const std::vector<uint32_t> & steps = scope.node == kNone ? roots_ : nodes_[scope.node].children;
+    const double at = now_ - scope.from;
+    for (size_t i = 0; i < states.size(); ++i) {
+      const hddl::StateConstraint & c = states[i];
+      Track & t = scope.tracks[i];
+      if (c.kind == Kind::Before || c.kind == Kind::AtStart || c.kind == Kind::AtEnd) {
+        continue;
+      }
+      if (c.kind == Kind::After) {
+        if (!t.done && has_ended(steps[c.a])) {
+          t.done = true;
+          if (!state_holds(scope.node, c.first)) {
+            broken(scope.node, "after " + show(nodes_[steps[c.a]]));
+          }
+        }
+        continue;
+      }
+      if (c.kind == Kind::Between) {
+        if (has_ended(steps[c.a]) && !has_begun(steps[c.b]) && !state_holds(scope.node, c.first)) {
+          broken(scope.node, "between " + show(nodes_[steps[c.a]]) + " and " +
+            show(nodes_[steps[c.b]]));
+        }
+        continue;
+      }
+      const bool holds_now = state_holds(scope.node, c.first);
+      const bool second = c.second.valid() && state_holds(scope.node, c.second);
+      switch (c.kind) {
+        case Kind::Always:
+          if (!holds_now) {
+            broken(scope.node, "always");
+          }
+          break;
+        case Kind::Sometime:
+          t.seen = t.seen || holds_now;
+          break;
+        case Kind::AtMostOnce:
+          if (holds_now && (first || !t.was) && ++t.times > 1) {
+            broken(scope.node, "at-most-once");
+          }
+          break;
+        case Kind::SometimeBefore:
+          if (holds_now && !t.seen) {
+            broken(scope.node, "sometime-before");
+          }
+          t.seen = t.seen || second;
+          break;
+        case Kind::SometimeAfter:
+          t.pending = (t.pending || holds_now) && !second;
+          break;
+        case Kind::Within:
+          t.seen = t.seen || (holds_now && at <= c.from + 1e-9);
+          break;
+        case Kind::HoldAfter:
+        case Kind::HoldDuring: {
+            const char * name = c.kind == Kind::HoldAfter ? "hold-after" : "hold-during";
+            const bool reached = at >= c.from - 1e-9;
+            const bool over = c.kind == Kind::HoldDuring && at >= c.to - 1e-9;
+            // The state at its time is the one before, if that time went by with nothing
+            // taking place
+            if (reached && !t.done && !first && at > c.from + 1e-9 && !t.was) {
+              broken(scope.node, name);
+            }
+            if (reached && !over && !holds_now) {
+              broken(scope.node, name);
+            }
+            t.done = t.done || reached;
+            break;
+          }
+        case Kind::AlwaysWithin:
+          if (holds_now && !t.pending) {
+            t.pending = true;
+            t.since = now_;
+          }
+          // Late, whether the second has come by now or not
+          if (t.pending && now_ - t.since > c.from + 1e-9) {
+            broken(scope.node, "always-within");
+          }
+          if (second) {
+            t.pending = false;
+          }
+          break;
+        default:
+          break;
+      }
+      t.was = holds_now;
+    }
+  }
+
+  // Its task has ended (the plan, for the initial network): what was awaited did not come
+  void close_scope(Scope & scope)
+  {
+    using Kind = hddl::ConstraintKind;
+    const std::vector<hddl::StateConstraint> & states = network(scope).states;
+    for (size_t i = 0; i < states.size(); ++i) {
+      const hddl::StateConstraint & c = states[i];
+      const Track & t = scope.tracks[i];
+      const char * what =
+        c.kind == Kind::AtEnd && !state_holds(scope.node, c.first) ? "at end" :
+        c.kind == Kind::Sometime && !t.seen ? "sometime" :
+        c.kind == Kind::Within && !t.seen ? "within" :
+        c.kind == Kind::SometimeAfter && t.pending ? "sometime-after" :
+        c.kind == Kind::AlwaysWithin && t.pending ? "always-within" : nullptr;
+      if (what != nullptr) {
+        broken(scope.node, what);
+      }
+    }
+  }
+
+  // After something has taken place: the scopes under way see the new state
+  void observe_all()
+  {
+    for (size_t i = 0; i < scopes_.size(); ) {
+      observe(scopes_[i], false);
+      if (scopes_[i].node != kNone && has_ended(scopes_[i].node)) {
+        close_scope(scopes_[i]);
+        scopes_.erase(scopes_.begin() + static_cast<std::ptrdiff_t>(i));
+      } else {
+        ++i;
       }
     }
   }
@@ -1571,6 +1794,9 @@ private:
       }
     }
     settle();
+    if (!m_.initial.states.empty()) {
+      open_scope(kNone);
+    }
     if (timed_) {
       happenings();
     } else if (!literals_.empty()) {
@@ -1578,6 +1804,11 @@ private:
       one_after_another_waiting();
     } else {
       one_after_another();
+    }
+    for (Scope & scope : scopes_) {
+      if (scope.node == kNone) {
+        close_scope(scope);
+      }
     }
     if (placed_ != events_.size()) {
       for (uint32_t e : waiting_) {
@@ -1670,6 +1901,7 @@ private:
   std::string times_broken_;
   double now_ = 0.0;                // the time of what is taking place
   std::vector<uint32_t> lasting_;   // nodes of durative methods with a condition, under way
+  std::vector<Scope> scopes_;       // networks with constraints on states, under way
   std::vector<Literal> literals_;  // the timed initial literals, in the order of time
   size_t next_literal_ = 0;        // the first that has not taken place
   bool timed_ = false;     // the plan gives the times
@@ -1697,7 +1929,9 @@ Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree, Or
     }
     return Outcome{true, "", verifier.metric(), verifier.times()};
   } catch (const Invalid & e) {
-    return Outcome{false, e.reason, std::nullopt, {}};
+    Outcome outcome{false, e.reason, std::nullopt, {}};
+    outcome.constraint = e.constraint;
+    return outcome;
   }
 }
 

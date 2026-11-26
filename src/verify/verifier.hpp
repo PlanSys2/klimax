@@ -49,6 +49,9 @@ struct Outcome
   // Not valid, and only because its times break a constraint on times or durations: with
   // other times the same actions and decomposition may be a plan
   bool only_times = false;
+  // Not valid because a constraint of HDDL 2.1 on the states of the plan does not hold
+  // (before, after, between, always...): the searches do not look at those
+  bool constraint = false;
 };
 
 /// @brief A step of a verified plan: an action, or a task with the method that decomposes it.

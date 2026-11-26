@@ -116,6 +116,92 @@ Subtask parse_subtask(Fragments & p, const Token & open, const Token & head)
   return s;
 }
 
+// The constraints of HDDL 2.1 on the states of the plan, after their first word. False if
+// `head` is not one of them
+bool state_constraint(Fragments & p, const Token & head, Constraint & c)
+{
+  auto id = [&]() {return p.intern(p.expect(TokenKind::Name, "subtask id").text);};
+  auto time = [&]() {
+      const Token t = p.next();
+      if (t.kind != TokenKind::Number || t.number < 0.0) {
+        // The grammar of HDDL 2.1 writes a time point of a task here, which gives no deadline
+        p.error("hddl.constraint", "expected a time, as in PDDL 3.0: (" +
+          lower(head.text) + " <number> ...)", t);
+      }
+      return t.number;
+    };
+  auto gd = [&]() {return p.condition(false, false);};
+  static const std::array<std::pair<std::string_view, ConstraintKind>, 3> kOne = {{
+    {"always", ConstraintKind::Always}, {"sometime", ConstraintKind::Sometime},
+    {"at-most-once", ConstraintKind::AtMostOnce}}};
+  if (head.kind != TokenKind::Name) {
+    return false;
+  }
+  const std::string word = lower(head.text);
+  if (word == "before" || word == "after") {
+    c.kind = word == "before" ? ConstraintKind::Before : ConstraintKind::After;
+    c.a = id();
+    c.first = gd();
+  } else if (word == "between") {
+    c.kind = ConstraintKind::Between;
+    c.a = id();
+    c.b = id();
+    c.first = gd();
+  } else if (word == "at") {
+    // (at start gd), (at end gd); and of a subtask, (at (start id) gd) and (at (end id) gd),
+    // which are (before id gd) and (after id gd)
+    bool start = false;
+    if (p.peek().kind == TokenKind::LParen) {
+      p.next();
+      const Token which = p.next();
+      start = is_word(which, "start");
+      if (!start && !is_word(which, "end")) {
+        p.error("hddl.constraint", "expected 'start' or 'end' before a subtask id", which);
+      }
+      c.kind = start ? ConstraintKind::Before : ConstraintKind::After;
+      c.a = id();
+      p.expect(TokenKind::RParen, "')' closing the time point");
+    } else {
+      const Token which = p.next();
+      start = is_word(which, "start");
+      if (!start && !is_word(which, "end")) {
+        p.error("hddl.constraint", "expected 'start' or 'end' after 'at'", which);
+      }
+      c.kind = start ? ConstraintKind::AtStart : ConstraintKind::AtEnd;
+    }
+    c.first = gd();
+  } else if (word == "sometime-before" || word == "sometime-after") {
+    c.kind = word == "sometime-before" ? ConstraintKind::SometimeBefore :
+      ConstraintKind::SometimeAfter;
+    c.first = gd();
+    c.second = gd();
+  } else if (word == "within" || word == "hold-after") {
+    c.kind = word == "within" ? ConstraintKind::Within : ConstraintKind::HoldAfter;
+    c.from = time();
+    c.first = gd();
+  } else if (word == "hold-during") {
+    c.kind = ConstraintKind::HoldDuring;
+    c.from = time();
+    c.to = time();
+    c.first = gd();
+  } else if (word == "always-within") {
+    c.kind = ConstraintKind::AlwaysWithin;
+    c.from = time();
+    c.first = gd();
+    c.second = gd();
+  } else {
+    for (const auto & [text, kind] : kOne) {
+      if (word == text) {
+        c.kind = kind;
+        c.first = gd();
+        return true;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
 // After "(" head: "(= t1 t2)", "(sortof ?v - type)" or "(not <one of those>)"
 Constraint parse_constraint(Fragments & p, const Token & open, const Token & head)
 {
@@ -140,8 +226,11 @@ Constraint parse_constraint(Fragments & p, const Token & open, const Token & hea
       p.error("hddl.constraint", "expected '- type' in a sort constraint", dash);
     }
     c.types.push_back(p.intern(p.expect(TokenKind::Name, "type name").text));
+  } else if (!negated && state_constraint(p, op, c)) {
+    // read
   } else {
-    p.error("hddl.constraint", "unsupported constraint: expected '=', 'sortof' or 'not'", op);
+    p.error("hddl.constraint", "unsupported constraint: expected '=', 'sortof', 'not', "
+      "'before', 'after', 'between' or a constraint on the states of the plan", op);
   }
   p.expect(TokenKind::RParen, "')' closing the constraint");
   if (negated) {

@@ -140,6 +140,10 @@ Every task occurrence `t` has two time points, `start(t)` and `end(t)`, with
 - `(after id φ)`: `φ` holds in the state just after `end(id)`.
 - `(between id1 id2 φ)`: `φ` holds in every state from just after `end(id1)` to just before
   `start(id2)`.
+- `(at (start id) φ)` and `(at (end id) φ)` are `(before id φ)` and `(after id φ)`.
+
+The states of a plan are the one it starts in and the one after each thing that takes place in
+it (an action, the start or the end of a durative one, a timed initial literal).
 
 The timed constraints (`at`, `hold-during`, `hold-after`, `always`, `sometime`, `at-most-once`,
 `sometime-before`, `sometime-after`, `always-within`, `within`) have the semantics of the PDDL 3.0
@@ -148,6 +152,9 @@ trajectory constraints **restricted to the interval of the method that states th
 the interval is the whole plan. The 2023 paper evaluates them on the trajectory of "the task
 network", and its decomposition merges the constraints of a method into those of the whole
 network; read literally, an `always` stated in a method would then hold over the whole plan.
+**[decision]** The times of `within`, `hold-after`, `hold-during` and `always-within` count
+from `start(t)`. A task with no action below it has no interval, and its constraints say
+nothing.
 
 ## 4. Syntax accepted
 

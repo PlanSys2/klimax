@@ -99,6 +99,23 @@ struct DurationConstraint
   ast::ExprId rhs;
 };
 
+/// @brief A constraint of HDDL 2.1 on the states of the plan: what must hold just before a
+/// step, just after it or between two, or along the task that the network decomposes.
+struct StateConstraint
+{
+  ConstraintKind kind = ConstraintKind::Always;
+  uint32_t a = 0;          // steps (Before, After, Between)
+  uint32_t b = 0;
+  ast::FormulaId first;    // in the nodes of the domain; of the problem for the initial network
+  ast::FormulaId second;
+  double from = 0.0;       // times after the start of the task
+  double to = 0.0;
+  // `first` of a method as an action of `pddl` with no effect, as its precondition is (-1:
+  // none, for the initial network), and the parameters of the method that are that action's
+  int32_t action = -1;
+  std::vector<uint32_t> action_params;
+};
+
 struct Network
 {
   std::vector<Step> steps;
@@ -109,6 +126,7 @@ struct Network
   // comparison of time points, or one that is not "ends before it starts". Checked on the
   // times of a plan
   std::vector<TimeConstraint> times;
+  std::vector<StateConstraint> states;
   std::vector<VarConstraint> constraints;
   std::vector<SortConstraint> sorts;
   bool total_order = false;  // the order leaves a single sequence

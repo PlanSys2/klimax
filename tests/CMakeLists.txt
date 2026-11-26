@@ -48,6 +48,7 @@ klimax_add_gtest(numeric_test search/numeric_test.cpp)
 klimax_add_gtest(metric_test search/metric_test.cpp)
 klimax_add_gtest(object_fluents_test search/object_fluents_test.cpp)
 klimax_add_gtest(temporal_test search/temporal_test.cpp)
+klimax_add_gtest(constraints_test search/constraints_test.cpp)
 
 if(KLIMAX_BUILD_CLI)
   add_test(NAME cli_version COMMAND klimax_cli --version)

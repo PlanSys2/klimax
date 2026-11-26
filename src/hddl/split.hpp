@@ -38,6 +38,19 @@ namespace klimax::hddl
  */
 size_t split_parameters(Model & model);
 
+/**
+ * @brief What a method asks to hold just before a subtask, (before id gd) and the end of
+ * (between id1 id2 gd), as something the searches test: the subtask becomes a new task whose
+ * only method has that condition as its precondition and the subtask as its only one.
+ *
+ * A precondition is tested at some point before the subtask starts, not just before: where
+ * the order of the tasks leaves room for something in between, the verifier still decides.
+ * The new tasks and methods are `artificial`. Call it before split_parameters().
+ *
+ * @return how many subtasks were wrapped.
+ */
+size_t test_before(Model & model);
+
 }  // namespace klimax::hddl
 
 #endif  // KLIMAX__HDDL__SPLIT_HPP_

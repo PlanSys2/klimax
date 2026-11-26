@@ -173,6 +173,56 @@ size_t split_one(Model & model, MethodInfo & method)
 
 }  // namespace
 
+size_t test_before(Model & model)
+{
+  size_t wrapped = 0;
+  const size_t original = model.methods.size();
+  for (size_t index = 0; index < original; ++index) {
+    for (size_t k = 0; k < model.methods[index].network.states.size(); ++k) {
+      const StateConstraint c = model.methods[index].network.states[k];
+      const bool before = c.kind == ConstraintKind::Before || c.kind == ConstraintKind::Between;
+      if (!before || c.action < 0) {
+        continue;
+      }
+      const uint32_t target = c.kind == ConstraintKind::Before ? c.a : c.b;
+      const MethodInfo method = model.methods[index];
+      const Step step = method.network.steps[target];
+      // A task with every parameter of the method: its condition and its subtask use them
+      TaskInfo task;
+      task.name = "before:" + method.name + "#" + std::to_string(k);
+      task.artificial = true;
+      task.loc = step.loc;
+      MethodInfo test;
+      test.name = task.name;
+      test.artificial = true;
+      test.loc = step.loc;
+      test.params = method.params;
+      Step outer;
+      outer.id = step.id;
+      outer.loc = step.loc;
+      for (uint32_t p = 0; p < method.params.size(); ++p) {
+        task.params.push_back(method.params[p].types);
+        test.task_args.push_back(Arg{true, p});
+        outer.args.push_back(Arg{true, p});
+      }
+      test.precondition_action = c.action;
+      test.precondition_params = c.action_params;
+      test.network.steps.push_back(step);
+      test.network.total_order = true;
+      test.task = model.tasks.push_back(std::move(task));
+      outer.task = test.task;
+      model.methods[index].network.steps[target] = std::move(outer);
+      model.methods.push_back(std::move(test));
+      ++wrapped;
+    }
+  }
+  model.methods_of.assign(model.tasks.size(), {});
+  for (size_t i = 0; i < model.methods.size(); ++i) {
+    model.methods_of[model.methods[i].task.index()].push_back(static_cast<uint32_t>(i));
+  }
+  return wrapped;
+}
+
 size_t split_parameters(Model & model)
 {
   size_t moved = 0;

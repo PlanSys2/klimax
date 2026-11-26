@@ -70,7 +70,23 @@ enum class ConstraintKind : uint8_t
   Equal,      // (= t1 t2)
   Different,  // (not (= t1 t2))
   Sort,       // (sortof ?v - type)
-  NotSort     // (not (sortof ?v - type))
+  NotSort,    // (not (sortof ?v - type))
+  // HDDL 2.1, on the states of the plan: a condition `first` (and `second`) and, for some,
+  // subtask ids `a` and `b` or times `from` and `to`
+  Before,          // (before id gd): just before the subtask starts
+  After,           // (after id gd): just after it ends
+  Between,         // (between id1 id2 gd): from the end of one to the start of the other
+  AtStart,         // (at start gd): when the task decomposed starts
+  AtEnd,           // (at end gd)
+  Always,          // (always gd): while it lasts
+  Sometime,        // (sometime gd)
+  AtMostOnce,      // (at-most-once gd)
+  SometimeBefore,  // (sometime-before gd1 gd2): if gd1 ever holds, gd2 did before
+  SometimeAfter,   // (sometime-after gd1 gd2): whenever gd1 holds, gd2 does then or later
+  Within,          // (within t gd): by t after it starts
+  HoldAfter,       // (hold-after t gd): from t on
+  HoldDuring,      // (hold-during t1 t2 gd)
+  AlwaysWithin     // (always-within t gd1 gd2): whenever gd1 holds, gd2 does within t
 };
 
 struct Constraint
@@ -80,6 +96,12 @@ struct Constraint
   ast::TermId rhs;            // Equal, Different
   std::vector<Symbol> types;  // Sort, NotSort
   ast::Loc loc;
+  Symbol a;                   // subtask ids
+  Symbol b;
+  ast::FormulaId first;
+  ast::FormulaId second;
+  double from = 0.0;
+  double to = 0.0;
 };
 
 struct TaskNetwork

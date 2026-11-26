@@ -153,6 +153,37 @@ private:
       precondition_action_[i] = static_cast<int32_t>(m_.pddl.actions.size());
       m_.pddl.actions.push_back(std::move(a));
     }
+    // The conditions of the constraints on states too: read by Kairos, asked for by nothing
+    for (size_t i = 0; i < methods_.size(); ++i) {
+      const Method & method = methods_[i];
+      size_t k = 0;
+      for (const Constraint & c : method.network.constraints) {
+        for (ast::FormulaId formula : {c.first, c.second}) {
+          if (!formula.valid()) {
+            continue;
+          }
+          ast::Action a;
+          a.name = m_.pddl.symbols.intern(
+            std::string(kPreconditionPrefix) + "constraint " +
+            std::string(m_.pddl.symbols.name(method.name)) + "#" + std::to_string(i) + "#" +
+            std::to_string(k++));
+          std::unordered_set<uint32_t> used;
+          variables_of(formula, used);
+          std::vector<uint32_t> positions;
+          for (uint32_t p = 0; p < method.params.size(); ++p) {
+            if (used.count(method.params[p].name.value()) != 0) {
+              a.params.push_back(method.params[p]);
+              positions.push_back(p);
+            }
+          }
+          a.precondition = formula;
+          a.loc = c.loc;
+          constraint_action_[formula.value()] = {later_.size(), std::move(positions)};
+          later_.push_back(std::move(a));
+        }
+      }
+    }
+    later_from_ = m_.pddl.actions.size();
     for (ast::Action & a : later_) {
       m_.pddl.actions.push_back(std::move(a));
     }
@@ -406,6 +437,40 @@ private:
     out.total_order = check_order(out, n, in.ordering.empty() ? ast::Loc{} : in.ordering[0].loc);
 
     for (const Constraint & c : in.constraints) {
+      if (c.first.valid()) {
+        StateConstraint state;
+        state.kind = c.kind;
+        state.first = c.first;
+        state.second = c.second;
+        state.from = c.from;
+        state.to = c.to;
+        if (const auto action = constraint_action_.find(c.first.value());
+          action != constraint_action_.end() && in_method_)
+        {
+          state.action = static_cast<int32_t>(later_from_ + action->second.first);
+          state.action_params = action->second.second;
+        }
+        bool known = true;
+        for (auto [symbol, step] : {std::pair(c.a, &state.a), std::pair(c.b, &state.b)}) {
+          if (symbol.valid()) {
+            const auto found = ids.find(name(symbol));
+            if (found == ids.end()) {
+              error("hddl.unknown_subtask_id", "unknown subtask id " + name(symbol), c.loc);
+              known = false;
+            } else {
+              *step = found->second;
+            }
+          }
+        }
+        if (c.kind == ConstraintKind::HoldDuring && c.to < c.from) {
+          error("hddl.constraint", "hold-during: the second time is before the first", c.loc);
+          known = false;
+        }
+        if (known) {
+          out.states.push_back(state);
+        }
+        continue;
+      }
       std::optional<Arg> lhs = resolve(c.lhs, params);
       if (c.kind == ConstraintKind::Equal || c.kind == ConstraintKind::Different) {
         std::optional<Arg> rhs = resolve(c.rhs, params);
@@ -586,7 +651,9 @@ private:
     }
     out.task_args = resolve_args(m_.tasks[out.task], in.task_args, out.params, in.task_loc);
     std::unordered_map<std::string, uint32_t> ids;
+    in_method_ = true;
     out.network = analyze_network(in.network, out.params, &ids);
+    in_method_ = false;
     if (in.durative) {
       out.condition = in.precondition;
       for (const MethodDuration & d : in.duration) {
@@ -624,6 +691,11 @@ private:
   bool errors_ = false;
   std::vector<int32_t> precondition_action_;
   std::vector<ast::Action> later_;  // what durative methods ask over all and at end
+  size_t later_from_ = 0;           // where they start in pddl.actions
+  // The action of the condition of a constraint on states, by formula: place in later_ and
+  // the parameters of the method that are its own
+  std::unordered_map<uint32_t, std::pair<size_t, std::vector<uint32_t>>> constraint_action_;
+  bool in_method_ = false;          // the network being read is that of a method
   std::vector<std::vector<uint32_t>> precondition_params_;
   std::unordered_map<std::string, size_t> task_index_;
   std::unordered_set<std::string> method_names_;

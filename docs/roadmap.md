@@ -50,6 +50,12 @@ in [baseline.md](baseline.md).
   and the ends of subtasks, durative methods with their conditions at start, over all and at
   end, and constraints on the durations of a task and of its subtasks. Timed initial literals: a step waits for the one it needs (a clock that every step
   moves on, and each literal as the intervals of that clock in which it holds).
+- **Constraints on the states of the plan** (H6, level L4): `before`, `after` and `between` a
+  subtask, and along the task of a method `at start`, `at end`, `always`, `sometime`,
+  `at-most-once`, `sometime-before`, `sometime-after`, `within`, `hold-after`, `hold-during`
+  and `always-within`. The verifier checks them all. Of the searches, what must hold before a
+  subtask is tested as a precondition is; the rest is met by the plan found or the problem is
+  reported as not supported.
 - **Anytime and optimal** (H4): after the first plan Klimax looks for better ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans

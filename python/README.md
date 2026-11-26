@@ -32,8 +32,12 @@ if result.status == klimax.Status.SOLVED:
   solves the problem, and why not; with `decomposition`, a valid plan also as steps. `metric`
   is the value of the problem's metric at the end of a valid plan.
 
-Hierarchical problems with total or partial order, numeric fluents and action costs; without
-time. To build from
+With durative actions or timed initial literals the plan has times: `makespan` is when it ends,
+each step of `steps_of_plan` has `start` and `end` (a task, from the first of its actions to
+the last), and in `plan` each action is written `id time: (action args) [duration]`.
+
+Hierarchical problems with total or partial order, numeric fluents, action costs and time
+(see the [roadmap](../docs/roadmap.md) for what of time is not planned with yet). To build from
 source, Kairos must be installed with `-DKAIROS_INSTALL_CORE=ON`:
 
 ```

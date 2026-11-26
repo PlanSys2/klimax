@@ -303,6 +303,10 @@ public:
         step.args.push_back(object(a).name);
       }
       step.primitive = n.primitive;
+      if (temporal_) {
+        step.start = n.from;
+        step.end = n.to;
+      }
       if (!n.primitive) {
         const hddl::MethodInfo & method = m_.methods[n.method];
         step.method = method.name;

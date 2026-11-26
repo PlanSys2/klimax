@@ -151,6 +151,8 @@ void fill(Out & result, verifier::Tree & tree, const Spelling & spelling)
     out.params = std::move(step.params);
     out.subtasks = std::move(step.subtasks);
     out.labels = std::move(step.labels);
+    out.start = step.start;
+    out.end = step.end;
     result.steps_of_plan.push_back(std::move(out));
   }
   std::for_each(tree.root_labels.begin(), tree.root_labels.end(), name);
@@ -348,7 +350,9 @@ SolveResult solve(
     result.message = "a problem without :htn is a PDDL problem: use Kairos";
     return result;
   }
-  const bool temporal = !model->pddl.durative_actions.empty();
+  const bool temporal = !model->pddl.durative_actions.empty() ||
+    std::any_of(model->problem.init.begin(), model->problem.init.end(),
+    [](const kairos::ast::InitItem & item) {return item.time.has_value();});
   using Clock = kairos::BudgetConfig::Clock;
   auto seconds_since = [&](Clock::time_point t) {
       return std::chrono::duration<double>(Clock::now() - t).count();
@@ -627,10 +631,12 @@ SolveResult solve(
             if (order.complete) {
               const std::vector<verifier::Timed> earlier =
                 schedule(model.value(), order.actions, order.before);
-              if (!earlier.empty() &&
-                verifier::verify(model.value(), with_times(found.plan, earlier)).valid)
+              verifier::Tree timed;
+              if (!earlier.empty() && verifier::verify(model.value(),
+                with_times(found.plan, earlier), options.decomposition ? &timed : nullptr).valid)
               {
                 times = earlier;
+                tree = std::move(timed);
               }
             }
             result.plan = with_times(result.plan, times);

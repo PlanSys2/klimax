@@ -63,6 +63,10 @@ struct Step
   std::vector<std::string> params;    // objects, by parameter of the method
   std::vector<std::string> subtasks;  // ids, by subtask of the method as written in the domain
   std::vector<std::string> labels;    // of those subtasks in the domain; "" where not given
+  // In a plan with times: when it starts and when it ends. A task, when the first of its
+  // actions starts and the last one ends
+  std::optional<double> start;
+  std::optional<double> end;
 };
 
 /// @brief The decomposition of a verified plan.

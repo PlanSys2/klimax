@@ -161,5 +161,46 @@ def test_metric():
     assert klimax.verify(TRIP_DOMAIN, TRIP % "(station b)", result.plan).metric is None
 
 
+WORKERS = """
+(define (domain workers) (:requirements :typing :hierarchy :durative-actions)
+ (:types worker)
+ (:predicates (idle ?w - worker) (done ?w - worker))
+ (:task job :parameters (?w - worker))
+ (:method m :parameters (?w - worker) :task (job ?w) :subtasks (and (work ?w)))
+ (:durative-action work :parameters (?w - worker) :duration (= ?duration 5)
+  :condition (and (at start (idle ?w)))
+  :effect (and (at start (not (idle ?w))) (at end (idle ?w)) (at end (done ?w)))))
+"""
+
+TWO = """
+(define (problem two) (:domain workers) (:objects ann bob - worker)
+ (:htn %s (and (job ann) (job bob)))
+ (:init (idle ann) (idle bob))
+ (:goal (and (done ann) (done bob))))
+"""
+
+
+def test_time():
+    # Two jobs of five units: at once if the network does not order them
+    result = klimax.solve(WORKERS, TWO % ":subtasks", timeout=10)
+    assert result.status == klimax.Status.SOLVED, result.message
+    assert result.makespan == 5.0
+    actions = [s for s in result.steps_of_plan if s.primitive]
+    assert [(s.start, s.end) for s in actions] == [(0.0, 5.0), (0.0, 5.0)]
+    # A task lasts from the first of its actions to the last
+    tasks = [s for s in result.steps_of_plan if not s.primitive]
+    assert all((s.start, s.end) == (0.0, 5.0) for s in tasks)
+    checked = klimax.verify(WORKERS, TWO % ":subtasks", result.plan)
+    assert checked.valid and checked.makespan == 5.0
+    # One after the other if it does
+    result = klimax.solve(WORKERS, TWO % ":ordered-subtasks", timeout=10)
+    assert result.makespan == 10.0
+    assert not klimax.verify(WORKERS, TWO % ":ordered-subtasks",
+                             klimax.solve(WORKERS, TWO % ":subtasks").plan).valid
+    # Without time, no times
+    result = klimax.solve(TRIP_DOMAIN, TRIP % "(station b)", timeout=10)
+    assert result.makespan is None and result.steps_of_plan[0].start is None
+
+
 def test_version():
     assert klimax.__version__.count(".") == 2

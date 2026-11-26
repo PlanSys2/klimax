@@ -639,11 +639,14 @@ SolveResult solve(
               const std::vector<verifier::Timed> earlier =
                 schedule(model.value(), order.actions, order.before);
               verifier::Tree timed;
-              if (!earlier.empty() && verifier::verify(model.value(),
-                with_times(found.plan, earlier), options.decomposition ? &timed : nullptr).valid)
-              {
+              const verifier::Outcome taken = earlier.empty() ? verifier::Outcome{} :
+                verifier::verify(model.value(), with_times(found.plan, earlier),
+                  options.decomposition ? &timed : nullptr);
+              if (taken.valid) {
                 times = earlier;
                 tree = std::move(timed);
+              } else if (!earlier.empty() && std::getenv("KLIMAX_TRACE_SCHEDULE") != nullptr) {
+                std::fprintf(stderr, "schedule: not taken: %s\n", taken.reason.c_str());
               }
             }
             result.plan = with_times(result.plan, times);

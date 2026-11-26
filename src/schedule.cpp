@@ -16,6 +16,8 @@
 #include "schedule.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <set>
@@ -66,6 +68,13 @@ std::vector<verifier::Timed> schedule(
   const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
   const std::vector<std::pair<uint32_t, uint32_t>> & precedences)
 {
+  // KLIMAX_TRACE_SCHEDULE: why the plan is left with one action after another
+  auto gave_up = [](const std::string & why) {
+      if (std::getenv("KLIMAX_TRACE_SCHEDULE") != nullptr) {
+        std::fprintf(stderr, "schedule: %s\n", why.c_str());
+      }
+      return std::vector<verifier::Timed>();
+    };
   lifted::Task task = lifted::normalize(model.pddl, model.domain, model.problem, model.objects);
   // Only the instances that the plan uses are grounded: each action needs a fact that only
   // they have
@@ -103,11 +112,12 @@ std::vector<verifier::Timed> schedule(
   options.drop_useless_actions = false;
   auto ground = kairos::ground::ground(task, options);
   if (!ground.ok()) {
-    return {};
+    return gave_up("the actions of the plan cannot be grounded: " +
+             (ground.diagnostics().empty() ? std::string() : ground.diagnostics()[0].message));
   }
   auto translated = sas::translate(task, std::move(ground).value());
   if (!translated.ok()) {
-    return {};
+    return gave_up("no SAS task");
   }
   const sas::Task & original = translated.value();
   const kairos::temporal::Compressed compressed = kairos::temporal::compress(original);
@@ -133,14 +143,15 @@ std::vector<verifier::Timed> schedule(
       }
     }
     if (!next) {
-      return {};
+      return gave_up("step " + instance(model, s) + (found == by_name.end() ?
+               " is not an action of the task" : " cannot be replayed"));
     }
     state = *next;
   }
   const std::optional<kairos::Plan> plan = kairos::temporal::schedule(
     original, compressed, space, actions, 0.001, {}, precedences);
   if (!plan || plan->steps.size() != steps.size()) {
-    return {};
+    return gave_up("Kairos gives no schedule");
   }
   // Kairos gives the steps in the order of time: those of the same action, in the order of
   // the plan

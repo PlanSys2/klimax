@@ -1741,8 +1741,11 @@ private:
       temporal_ = true;
       all.push_back(Happening{l.time, 1, 0});
     }
-    std::stable_sort(all.begin(), all.end(), [](const Happening & a, const Happening & b) {
-        return a.time != b.time ? a.time < b.time : a.kind < b.kind;
+    // Times that differ by less than a millionth are the same time (a start written as the
+    // sum of another start and a duration)
+    auto instant_of = [](double t) {return std::llround(t * 1e6);};
+    std::stable_sort(all.begin(), all.end(), [&](const Happening & a, const Happening & b) {
+        return instant_of(a.time) != instant_of(b.time) ? a.time < b.time : a.kind < b.kind;
       });
     std::vector<Running> running(sequence_.size());
     for (const Happening & h : all) {

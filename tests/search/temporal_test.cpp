@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <string>
 
 #include "klimax/check.hpp"
@@ -271,6 +272,12 @@ TEST(TemporalTest, OrderingsBetweenTimePoints)
   EXPECT_FALSE(valid("(< a b)", "0", "4"));
   EXPECT_TRUE(valid("(> b a)", "0", "5"));
   EXPECT_FALSE(valid("(> a b)", "0", "5"));
+  // The end of one written as a sum and the start of the other as a number are the same time
+  for (const char * start : {"0.002", "7.002", "0.1", "1.3"}) {
+    char end[32];
+    std::snprintf(end, sizeof(end), "%.3f", std::stod(start) + 5.0);
+    EXPECT_TRUE(valid("(< a b)", start, end)) << start;
+  }
   // Its negation: b has started when a ends
   EXPECT_TRUE(valid("(not (< a b))", "0", "4"));
   EXPECT_FALSE(valid("(not (< a b))", "0", "6"));

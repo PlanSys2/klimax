@@ -117,6 +117,23 @@ TEST(ObjectFluentsTest, TheVerifierFollowsThem)
   EXPECT_FALSE(v.valid);
 }
 
+TEST(ObjectFluentsTest, ThePreconditionOfAMethodWithItsValues)
+{
+  SolveOptions options;
+  options.decomposition = true;
+  SolveResult r = solve(kDomain, problem(kRoads), options);
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  bool deliver = false;
+  for (const PlanStep & s : r.steps_of_plan) {
+    if (s.method == "deliver-it") {
+      deliver = true;
+      EXPECT_EQ(s.precondition, "(= (in b1) c)");
+      ASSERT_EQ(s.order.size(), 3u);  // the four subtasks in a row
+    }
+  }
+  EXPECT_TRUE(deliver);
+}
+
 TEST(ObjectFluentsTest, AFunctionTermAsTheArgumentOfATask)
 {
   // (go ?t (in ?b)): where the box is when the method is applied

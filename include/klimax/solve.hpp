@@ -22,6 +22,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "klimax/check.hpp"
@@ -70,6 +71,7 @@ struct SolveResult
   std::vector<std::string> sequence;
   std::vector<std::string> roots;
   std::vector<std::string> root_labels;
+  std::vector<std::pair<uint32_t, uint32_t>> root_order;  // positions in `roots`, as `order`
   std::string message;     // Unsupported: what is not supported
   std::vector<Diagnostic> diagnostics;
   size_t steps = 0;        // actions of the plan

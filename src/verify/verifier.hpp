@@ -66,6 +66,11 @@ struct Step
   std::vector<std::string> params;    // objects, by parameter of the method
   std::vector<std::string> subtasks;  // ids, by subtask of the method as written in the domain
   std::vector<std::string> labels;    // of those subtasks in the domain; "" where not given
+  // Of the method: pairs of positions in `subtasks`, the first ends before the second starts;
+  // and its precondition (what must hold at start, for a durative one) in PDDL with the
+  // values of its parameters, "" if it has none
+  std::vector<std::pair<uint32_t, uint32_t>> order;
+  std::string precondition;
   // In a plan with times: when it starts and when it ends. A task, when the first of its
   // actions starts and the last one ends
   std::optional<double> start;
@@ -79,6 +84,7 @@ struct Tree
   std::vector<std::string> sequence;  // ids of the actions, in the order of execution
   std::vector<std::string> roots;     // ids, by task of the initial task network
   std::vector<std::string> root_labels;
+  std::vector<std::pair<uint32_t, uint32_t>> root_order;  // positions in `roots`, as `order`
 };
 
 /// @brief The actions of a plan and what the hierarchy says of their order.

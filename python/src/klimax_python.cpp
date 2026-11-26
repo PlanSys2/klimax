@@ -18,6 +18,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/function.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
@@ -81,6 +82,8 @@ NB_MODULE(_klimax, m)
   .def_ro("params", &klimax::PlanStep::params)
   .def_ro("subtasks", &klimax::PlanStep::subtasks)
   .def_ro("labels", &klimax::PlanStep::labels)
+  .def_ro("order", &klimax::PlanStep::order)
+  .def_ro("precondition", &klimax::PlanStep::precondition)
   .def_ro("start", &klimax::PlanStep::start)
   .def_ro("end", &klimax::PlanStep::end);
 
@@ -91,6 +94,7 @@ NB_MODULE(_klimax, m)
   .def_ro("sequence", &klimax::SolveResult::sequence)
   .def_ro("roots", &klimax::SolveResult::roots)
   .def_ro("root_labels", &klimax::SolveResult::root_labels)
+  .def_ro("root_order", &klimax::SolveResult::root_order)
   .def_ro("message", &klimax::SolveResult::message)
   .def_ro("diagnostics", &klimax::SolveResult::diagnostics)
   .def_ro("steps", &klimax::SolveResult::steps)
@@ -111,6 +115,7 @@ NB_MODULE(_klimax, m)
   .def_ro("sequence", &klimax::VerifyResult::sequence)
   .def_ro("roots", &klimax::VerifyResult::roots)
   .def_ro("root_labels", &klimax::VerifyResult::root_labels)
+  .def_ro("root_order", &klimax::VerifyResult::root_order)
   .def_ro("diagnostics", &klimax::VerifyResult::diagnostics);
 
   m.def("check",

@@ -427,5 +427,25 @@ TEST(TemporalTest, ConditionsOfDurativeMethods)
   }
 }
 
+TEST(TemporalTest, TheDecompositionSaysOrdersAndPreconditions)
+{
+  // What an executor needs to follow the plan by its hierarchy
+  SolveOptions options;
+  options.decomposition = true;
+  SolveResult r = solve(kSites, sites("30"), options);
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  ASSERT_EQ(r.root_order.size(), 1u);  // observe a, then observe b
+  EXPECT_EQ(r.root_order[0], (std::pair<uint32_t, uint32_t>(0, 1)));
+  for (const PlanStep & s : r.steps_of_plan) {
+    if (!s.primitive) {
+      EXPECT_EQ(s.method, "m");
+      EXPECT_TRUE(s.precondition.empty());
+    }
+  }
+  r = solve(kJobs, jobs("(< a b)"), options);
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  EXPECT_EQ(r.root_order.size(), 1u);
+}
+
 }  // namespace
 }  // namespace klimax

@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "validate/validator.hpp"
+#include "pddl/printer.hpp"
 #include "validate/world.hpp"
 #include "verify/interpreter.hpp"
 
@@ -317,6 +318,8 @@ public:
           step.subtasks.push_back(nodes_[c].id);
         }
         step.labels = labels(method.network);
+        step.order = method.network.order;
+        step.precondition = precondition_text(n);
       }
       out.steps.push_back(std::move(step));
     }
@@ -327,6 +330,43 @@ public:
       out.roots.push_back(nodes_[n].id);
     }
     out.root_labels = labels(m_.initial);
+    out.root_order = m_.initial.order;
+    return out;
+  }
+
+  // The precondition of the method of a node in PDDL, with the values of its parameters
+  std::string precondition_text(const Node & n) const
+  {
+    const hddl::MethodInfo & method = m_.methods[n.method];
+    if (method.precondition_action < 0) {
+      return "";
+    }
+    const ast::Action & a = m_.pddl.actions[static_cast<size_t>(method.precondition_action)];
+    if (!a.precondition.valid()) {
+      return "";
+    }
+    const std::string text = kairos::pddl::to_pddl(m_.pddl.nodes, m_.pddl.symbols, a.precondition);
+    // Every ?name of a parameter as its value; quantified variables stay
+    std::string out;
+    for (size_t i = 0; i < text.size(); ) {
+      if (text[i] != '?') {
+        out += text[i++];
+        continue;
+      }
+      size_t end = i + 1;
+      while (end < text.size() && text[end] != ' ' && text[end] != ')' && text[end] != '(') {
+        ++end;
+      }
+      const std::string name = text.substr(i, end - i);
+      std::string value = name;
+      for (size_t p = 0; p < method.params.size(); ++p) {
+        if (method.params[p].name == name && !n.bindings.empty()) {
+          value = object(n.bindings[n.held][p]).name;
+        }
+      }
+      out += value;
+      i = end;
+    }
     return out;
   }
 

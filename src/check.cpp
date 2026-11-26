@@ -155,12 +155,15 @@ void fill(Out & result, verifier::Tree & tree, const Spelling & spelling)
     out.labels = std::move(step.labels);
     out.start = step.start;
     out.end = step.end;
+    out.order = std::move(step.order);
+    out.precondition = std::move(step.precondition);
     result.steps_of_plan.push_back(std::move(out));
   }
   std::for_each(tree.root_labels.begin(), tree.root_labels.end(), name);
   result.sequence = std::move(tree.sequence);
   result.roots = std::move(tree.roots);
   result.root_labels = std::move(tree.root_labels);
+  result.root_order = std::move(tree.root_order);
 }
 
 // The first line of `plan` whose action or decomposition is not in the ground problem

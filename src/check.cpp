@@ -313,6 +313,15 @@ SolveResult solve(
     result.message = "a problem without :htn is a PDDL problem: use Kairos";
     return result;
   }
+  // Time is not planned with yet: said so, never answered as if the actions were not there
+  if (!model->pddl.durative_actions.empty() ||
+    std::any_of(model->problem.init.begin(), model->problem.init.end(),
+    [](const kairos::ast::InitItem & item) {return item.time.has_value();}))
+  {
+    result.status = Status::Unsupported;
+    result.message = "durative actions and timed initial literals";
+    return result;
+  }
   using Clock = kairos::BudgetConfig::Clock;
   auto seconds_since = [&](Clock::time_point t) {
       return std::chrono::duration<double>(Clock::now() - t).count();

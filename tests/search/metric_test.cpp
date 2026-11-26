@@ -236,5 +236,22 @@ TEST(MetricTest, ShortestPaths)
   }
 }
 
+TEST(SolveTest, TimeIsRefusedNotAnswered)
+{
+  // A durative action is not planned with yet: "not supported", never "no plan"
+  const char * domain =
+    "(define (domain d) (:requirements :typing :hierarchy :durative-actions)\n"
+    " (:predicates (done))\n"
+    " (:task t :parameters ())\n"
+    " (:method m :parameters () :task (t) :ordered-subtasks (and (work)))\n"
+    " (:durative-action work :parameters () :duration (= ?duration 2)\n"
+    "  :condition (and) :effect (at end (done))))";
+  const char * p = "(define (problem p) (:domain d)\n"
+    "(:htn :ordered-subtasks (and (t))) (:init))";
+  SolveResult r = solve(domain, p);
+  EXPECT_EQ(r.status, Status::Unsupported) << r.message << r.plan;
+  EXPECT_FALSE(r.message.empty());
+}
+
 }  // namespace
 }  // namespace klimax

@@ -66,6 +66,11 @@ target_include_directories(klimax PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_include_directories(klimax PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(klimax PRIVATE kairos::core)
+# Kairos' modules are inside, not part of the API: a process that also loads libkairos (as
+# PlanSys2 does) keeps each copy to its own
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(klimax PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
 klimax_configure_target(klimax)
 
 install(TARGETS klimax EXPORT klimaxTargets

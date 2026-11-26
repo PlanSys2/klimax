@@ -19,6 +19,7 @@
 #define KLIMAX__HDDL__SPLIT_HPP_
 
 #include <cstddef>
+#include <string>
 
 #include "hddl/model.hpp"
 
@@ -50,6 +51,23 @@ size_t split_parameters(Model & model);
  * @return how many subtasks were wrapped.
  */
 size_t test_before(Model & model);
+
+/// The name of the task that ends the durative action `name` (see start_and_end()).
+inline std::string end_of(const std::string & name) {return name + "#end";}
+
+/**
+ * @brief Every durative action as two steps, its start and its end, so that the searches can
+ * put other steps between them: for problems where an action needs what another gives only
+ * while it runs.
+ *
+ * A new primitive task ends each durative action (TaskInfo::end). In every task network a step
+ * of a durative action is followed by a new step of its end, which takes over what was ordered
+ * after it: the step itself is from then on the start. A network that orders all its steps
+ * still does; one that does not lets other steps come in between.
+ *
+ * Call it before test_before() and split_parameters().
+ */
+void start_and_end(Model & model);
 
 }  // namespace klimax::hddl
 

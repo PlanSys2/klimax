@@ -173,6 +173,51 @@ size_t split_one(Model & model, MethodInfo & method)
 
 }  // namespace
 
+void start_and_end(Model & model)
+{
+  // The task that ends each durative action
+  std::vector<TaskId> end(model.tasks.size());
+  const size_t original = model.tasks.size();
+  for (size_t t = 0; t < original; ++t) {
+    const TaskInfo info = model.tasks[TaskId(static_cast<uint32_t>(t))];
+    if (info.primitive && info.durative) {
+      TaskInfo ends = info;
+      ends.name = end_of(info.name);
+      ends.end = true;
+      end[t] = model.tasks.push_back(std::move(ends));
+    }
+  }
+  auto rewrite = [&](Network & net) {
+      const size_t steps = net.steps.size();
+      for (uint32_t s = 0; s < steps; ++s) {
+        const TaskInfo & info = model.tasks[net.steps[s].task];
+        if (!info.primitive || !info.durative || info.end) {
+          continue;
+        }
+        Step last = net.steps[s];
+        last.task = end[net.steps[s].task.index()];
+        last.id.clear();
+        const uint32_t added = static_cast<uint32_t>(net.steps.size());
+        // What came after the action comes after its end
+        for (auto & [a, b] : net.order) {
+          if (a == s) {
+            a = added;
+          }
+        }
+        net.order.emplace_back(s, added);
+        net.steps.push_back(std::move(last));
+      }
+    };
+  for (MethodInfo & method : model.methods) {
+    rewrite(method.network);
+  }
+  rewrite(model.initial);
+  model.methods_of.assign(model.tasks.size(), {});
+  for (size_t i = 0; i < model.methods.size(); ++i) {
+    model.methods_of[model.methods[i].task.index()].push_back(static_cast<uint32_t>(i));
+  }
+}
+
 size_t test_before(Model & model)
 {
   size_t wrapped = 0;

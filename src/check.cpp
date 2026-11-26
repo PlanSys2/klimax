@@ -27,11 +27,13 @@
 #include <stop_token>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "hddl/model.hpp"
 #include "hddl/parser.hpp"
+#include "hddl/split.hpp"
 #include "kairos/diagnostics.hpp"
 #include "pddl/lexer.hpp"
 #include "schedule.hpp"
@@ -327,6 +329,85 @@ std::string with_times(const std::string & plan, const std::vector<verifier::Tim
   return out;
 }
 
+// A plan found with the start and the end of each durative action as two steps (the names of
+// the ends are hddl::end_of()'s): the plan with one line per action, in the order they start;
+// its actions; and what takes place, in order. False if it cannot be read
+bool without_ends(
+  const hddl::Model & model, const std::string & plan, std::string & clean,
+  std::vector<verifier::Order::Action> & steps, std::vector<Happening> & happenings)
+{
+  std::unordered_map<std::string, uint32_t> task_of;
+  for (uint32_t t = 0; t < model.tasks.size(); ++t) {
+    task_of.emplace(model.tasks[hddl::TaskId(t)].name, t);
+  }
+  const std::string suffix = hddl::end_of("");
+  std::unordered_map<std::string, std::vector<uint32_t>> running;  // by action: steps open
+  std::unordered_set<std::string> ends;                            // ids of the lines taken out
+  std::istringstream in(plan);
+  bool actions = false;
+  for (std::string line; std::getline(in, line); ) {
+    std::istringstream words(line);
+    std::vector<std::string> w;
+    for (std::string word; words >> word; ) {
+      w.push_back(word);
+    }
+    if (!w.empty() && w[0] == "root") {
+      actions = false;
+    }
+    if (!actions || w.size() < 2) {
+      // The lines of the tree, without the ends among the subtasks
+      const size_t arrow = static_cast<size_t>(std::find(w.begin(), w.end(), "->") - w.begin());
+      const size_t from = !w.empty() && w[0] == "root" ? 1 : arrow + 2;
+      std::string kept;
+      for (size_t i = 0; i < w.size(); ++i) {
+        if (i < from || ends.count(w[i]) == 0) {
+          kept += (kept.empty() ? "" : " ") + w[i];
+        }
+      }
+      clean += (w.empty() ? line : kept) + "\n";
+      actions = actions || line.rfind("==>", 0) == 0;
+      continue;
+    }
+    std::string key;
+    for (size_t i = 1; i < w.size(); ++i) {
+      key += " " + (i == 1 && w[1].size() > suffix.size() &&
+        w[1].compare(w[1].size() - suffix.size(), suffix.size(), suffix) == 0 ?
+        w[1].substr(0, w[1].size() - suffix.size()) : w[i]);
+    }
+    const bool end = key != line.substr(line.find(' '));
+    if (end) {
+      auto open = running.find(key);
+      if (open == running.end() || open->second.empty()) {
+        return false;
+      }
+      happenings.push_back(Happening{open->second.front(), true});
+      open->second.erase(open->second.begin());
+      ends.insert(w[0]);
+      continue;
+    }
+    const auto task = task_of.find(w[1]);
+    if (task == task_of.end()) {
+      return false;
+    }
+    verifier::Order::Action step{hddl::TaskId(task->second), {}};
+    for (size_t i = 2; i < w.size(); ++i) {
+      const auto object = model.objects.objects.find(w[i]);
+      if (!object) {
+        return false;
+      }
+      step.args.push_back(object->value());
+    }
+    const uint32_t index = static_cast<uint32_t>(steps.size());
+    happenings.push_back(Happening{index, false});
+    if (model.tasks[step.task].durative) {
+      running[key].push_back(index);
+    }
+    steps.push_back(std::move(step));
+    clean += line + "\n";
+  }
+  return true;
+}
+
 SolveResult solve(
   std::string_view domain, std::string_view problem, const SolveOptions & options,
   std::string_view domain_file, std::string_view problem_file)
@@ -350,9 +431,11 @@ SolveResult solve(
     result.message = "a problem without :htn is a PDDL problem: use Kairos";
     return result;
   }
-  const bool temporal = !model->pddl.durative_actions.empty() ||
-    std::any_of(model->problem.init.begin(), model->problem.init.end(),
+  const bool timed_literals = std::any_of(
+    model->problem.init.begin(), model->problem.init.end(),
     [](const kairos::ast::InitItem & item) {return item.time.has_value();});
+  const bool temporal = !model->pddl.durative_actions.empty() || timed_literals;
+  bool overlap = false;  // try with the start and the end of each durative action apart
   using Clock = kairos::BudgetConfig::Clock;
   auto seconds_since = [&](Clock::time_point t) {
       return std::chrono::duration<double>(Clock::now() - t).count();
@@ -613,6 +696,7 @@ SolveResult solve(
             result.plan.clear();
             break;
           }
+          overlap = !checked.valid && temporal && !timed_literals;
           if (!checked.valid && (temporal || checked.only_times)) {
             // Found taking each durative action as one step: where that is not enough (an
             // action needs what another gives only while it runs) the plan is not one
@@ -674,6 +758,7 @@ SolveResult solve(
       result.status = Status::Unsolvable;
       if (temporal) {
         // Only of the plans with one durative action after another
+        overlap = !timed_literals;
         result.status = Status::Unsupported;
         result.message = "no plan with each durative action as one step: actions that must "
           "overlap are not planned yet";
@@ -685,6 +770,60 @@ SolveResult solve(
     case search::Outcome::Unsupported:
       result.status = Status::Unsupported;
       break;
+  }
+  if (overlap && result.status == Status::Unsupported) {
+    // No plan with each durative action as one step: with its start and its end as two, so
+    // that others can come between them. Kairos then says when each takes place, if the
+    // durations and what must hold meanwhile allow that order
+    kairos::BudgetConfig limits;
+    limits.deadline = deadline ? *deadline : start + std::chrono::hours(24 * 365);
+    kairos::Budget budget(limits);
+    auto ground = tdg::ground(model.value(), &budget, true);
+    search::Result apart;
+    if (ground.ok()) {
+      try {
+        apart = search::total_order(ground.value(), &budget, {});
+      } catch (const std::bad_alloc &) {
+        apart.outcome = search::Outcome::OutOfBudget;
+      }
+    }
+    std::string clean;
+    std::vector<verifier::Order::Action> steps;
+    std::vector<Happening> happenings;
+    if (apart.outcome == search::Outcome::Solved &&
+      without_ends(model.value(), apart.plan, clean, steps, happenings))
+    {
+      const std::vector<verifier::Timed> times = schedule(model.value(), steps, happenings);
+      verifier::Tree tree;
+      const verifier::Outcome checked = times.empty() ? verifier::Outcome{} :
+        verifier::verify(model.value(), with_times(clean, times),
+          options.decomposition ? &tree : nullptr);
+      if (checked.valid) {
+        const Spelling spelling = spelling_of(domain, problem);
+        result.status = Status::Solved;
+        result.message = apart.message + ", the starts and the ends of the actions apart";
+        result.plan = with_times(with_original_names(clean, spelling), times);
+        result.steps = steps.size();
+        result.plans = 1;
+        result.optimal = false;
+        result.cost = checked.metric;
+        result.makespan = 0.0;
+        for (const verifier::Timed & t : times) {
+          result.makespan = std::max(*result.makespan, t.time + t.duration);
+        }
+        if (options.decomposition) {
+          fill(result, tree, spelling);
+        }
+      } else {
+        result.message = "a plan with the starts and the ends of its actions in an order that "
+          "has no valid times (" + (times.empty() ? std::string("Kairos finds none") :
+          checked.reason) + "): the searches do not look at durations yet";
+      }
+    } else if (apart.outcome == search::Outcome::OutOfBudget) {
+      result.status = Status::Timeout;
+    }
+    result.expansions += apart.expansions;
+    result.search_ms = since() - result.ground_ms;
   }
   return result;
 }

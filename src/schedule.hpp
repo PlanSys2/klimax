@@ -41,6 +41,25 @@ std::vector<verifier::Timed> schedule(
   const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
   const std::vector<std::pair<uint32_t, uint32_t>> & precedences);
 
+/// @brief Something that takes place in a plan found with the start and the end of each
+/// durative action as two steps: the start of a step of the plan (or the whole of it, if it
+/// has no duration), or its end.
+struct Happening
+{
+  uint32_t step = 0;  // of the plan
+  bool end = false;
+};
+
+/**
+ * @brief The same for a plan found with the starts and the ends of its durative actions in the
+ * order `happenings`: Kairos gives them times that keep that order, with every action lasting
+ * what it must and what must hold while it runs holding (temporal::TemporalFilter). Empty if
+ * no times do.
+ */
+std::vector<verifier::Timed> schedule(
+  const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
+  const std::vector<Happening> & happenings);
+
 }  // namespace klimax
 
 #endif  // KLIMAX__SCHEDULE_HPP_

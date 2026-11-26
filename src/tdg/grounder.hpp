@@ -94,9 +94,14 @@ struct Problem
  *
  * `unsolvable` is a proof: the relaxation only ever adds possibilities.
  *
+ * With `start_and_end`, every durative action is planned as two steps, its start and its end
+ * (hddl::start_and_end, tdg/compress.hpp), instead of one: for problems where actions must
+ * overlap.
+ *
  * Error "ground.budget" when the budget runs out.
  */
-kairos::Result<Problem> ground(const hddl::Model & model, kairos::Budget * budget = nullptr);
+kairos::Result<Problem> ground(
+  const hddl::Model & model, kairos::Budget * budget = nullptr, bool start_and_end = false);
 
 }  // namespace klimax::tdg
 

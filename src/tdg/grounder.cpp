@@ -69,9 +69,12 @@ struct OutOfBudget
 class Grounder
 {
 public:
-  Grounder(const Model & model, kairos::Budget * budget)
-  : owned_(model), m_(owned_), budget_(budget)
+  Grounder(const Model & model, kairos::Budget * budget, bool start_and_end)
+  : owned_(model), m_(owned_), budget_(budget), start_and_end_(start_and_end)
   {
+    if (start_and_end_) {
+      hddl::start_and_end(owned_);
+    }
     hddl::test_before(owned_);
     split_ = hddl::split_parameters(owned_);
   }
@@ -86,7 +89,9 @@ public:
     lifted_ = kairos::lifted::normalize(m_.pddl, m_.domain, m_.problem, m_.objects);
     // Time: each durative action as one step, the plan timed afterwards (check.cpp)
     std::string why;
-    if (!lifted_.timed_events.empty()) {
+    if (start_and_end_) {
+      why = start_and_end(lifted_);
+    } else if (!lifted_.timed_events.empty()) {
       // With timed initial literals every step moves a clock on (tdg/timed.hpp)
       std::set<std::string> steps;
       for (uint32_t i = 0; i < m_.user_actions; ++i) {
@@ -94,7 +99,7 @@ public:
       }
       why = clock(lifted_, [&](const std::string & name) {return steps.count(name) != 0;});
     }
-    if (why.empty()) {
+    if (why.empty() && !start_and_end_) {
       why = compress(lifted_);
     }
     if (!why.empty()) {
@@ -561,9 +566,11 @@ private:
   // Of a primitive task: its action, durative or not
   std::string action_name(const hddl::TaskInfo & info) const
   {
-    return info.durative ?
-           std::string(m_.pddl.symbols.name(m_.pddl.durative_actions[info.action].name)) :
-           action_name(info.action);
+    if (!info.durative) {
+      return action_name(info.action);
+    }
+    const std::string name(m_.pddl.symbols.name(m_.pddl.durative_actions[info.action].name));
+    return info.end ? hddl::end_of(name) : name;
   }
 
   std::string action_name(uint32_t action) const
@@ -1196,6 +1203,7 @@ private:
   const Model & m_;
   size_t split_ = 0;
   kairos::Budget * budget_;
+  bool start_and_end_ = false;  // durative actions as two steps
   bool trace_ = std::getenv("KLIMAX_TRACE_GROUND") != nullptr;  // sizes and times to stderr
   Problem p_;
   kairos::lifted::Task lifted_;
@@ -1220,9 +1228,10 @@ private:
 
 }  // namespace
 
-kairos::Result<Problem> ground(const hddl::Model & model, kairos::Budget * budget)
+kairos::Result<Problem> ground(
+  const hddl::Model & model, kairos::Budget * budget, bool start_and_end)
 {
-  return Grounder(model, budget).run();
+  return Grounder(model, budget, start_and_end).run();
 }
 
 }  // namespace klimax::tdg

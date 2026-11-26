@@ -54,6 +54,9 @@ struct TaskInfo
   uint32_t action = 0;    // primitive: index in pddl.actions or pddl.durative_actions
   ast::Loc loc;
   bool artificial = false;  // added by parameter splitting: not part of a plan
+  // The end of the durative action `action`, where its start and its end are planned as two
+  // steps (hddl::start_and_end): the task of the action itself is then its start
+  bool end = false;
 };
 
 struct Step

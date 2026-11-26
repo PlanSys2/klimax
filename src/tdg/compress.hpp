@@ -43,6 +43,24 @@ namespace klimax::tdg
  */
 std::string compress(kairos::lifted::Task & task);
 
+/**
+ * @brief Every durative action as two instantaneous ones, its start (with its name) and its
+ * end (hddl::end_of() its name), as Kairos' engine for tasks that need concurrency does on the
+ * ground task (temporal/snap.hpp), here before grounding:
+ * - start: the conditions at start, those over all that its effects at start do not give, and
+ *   that it is not running; its effects at start, and it runs;
+ * - end: that it runs, the conditions at end and those over all; its effects at end, and it
+ *   no longer runs.
+ *
+ * Between the two anything may happen: that the conditions over all hold meanwhile, and that
+ * the times fit, is for whoever times the plan to say (Kairos does: schedule.hpp).
+ *
+ * The reason, and the task as it was, for what cannot be written so: timed initial literals,
+ * ?duration or continuous change in conditions and effects, or a condition at end over a
+ * variable that is not a parameter.
+ */
+std::string start_and_end(kairos::lifted::Task & task);
+
 /// The numeric fluent that says when the next step of a plan may start (see clock()).
 inline constexpr const char * kClock = "klimax-clock";
 /// Between a step and the next, as PDDL 2.1 asks of what happens at different times.

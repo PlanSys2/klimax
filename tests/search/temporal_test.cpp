@@ -115,10 +115,31 @@ std::string light(const std::string & subtasks)
 const char * kStudy = "(define (problem p) (:domain d)\n"
   "(:htn :subtasks (and (study))) (:init) (:goal (read)))";
 
+TEST(TemporalTest, ActionsThatMustOverlap)
+{
+  // With one action after another there is no plan: looking needs the light, which is on
+  // only while the switch is held. With the start and the end of each as two steps there is
+  SolveResult r = solve(light(":subtasks"), kStudy);
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  ASSERT_TRUE(r.makespan.has_value());
+  EXPECT_NEAR(*r.makespan, 5.0, 1e-9) << r.plan;
+  EXPECT_NE(r.plan.find("(hold) [5.000]"), std::string::npos) << r.plan;
+  EXPECT_NE(r.plan.find("(look) [2.000]"), std::string::npos) << r.plan;
+  EXPECT_EQ(r.plan.find("#end"), std::string::npos) << r.plan;
+  EXPECT_TRUE(verify(light(":subtasks"), kStudy, r.plan).valid);
+  // Not where the method orders them: holding ends before looking starts
+  r = solve(light(":ordered-subtasks"), kStudy);
+  EXPECT_NE(r.status, Status::Solved) << r.plan;
+  EXPECT_NE(r.status, Status::Unsolvable);
+}
+
 TEST(TemporalTest, WhatIsNotPlannedYetIsSaid)
 {
-  // Actions that must overlap: "no plan" would be false
-  SolveResult r = solve(light(":subtasks"), kStudy);
+  // Looking takes longer than the light lasts: no times fit, and that is not "no plan" said
+  // by a search that does not look at durations
+  std::string longer = light(":subtasks");
+  longer.replace(longer.find("(= ?duration 2)"), 15, "(= ?duration 7)");
+  SolveResult r = solve(longer, kStudy);
   EXPECT_EQ(r.status, Status::Unsupported) << r.message << r.plan;
   EXPECT_FALSE(r.message.empty());
 }

@@ -42,7 +42,8 @@ in [baseline.md](baseline.md).
   goal. Kairos grounds them and Klimax turns them into atoms, so that the searches and their
   heuristics see them; the verifier follows them with the evaluator of Kairos' validator.
 - **Time** (H6, first steps): durative actions, planned with each one as a single step, as
-  Kairos does with temporally simple problems. The plan is then timed by Kairos' scheduler:
+  Kairos does with temporally simple problems, or as its start and its end where actions must
+  overlap. The plan is then timed by Kairos' scheduler:
   each action as early as what it reads and writes and the orderings of the hierarchy allow,
   so actions that neither orders run at once. Kairos' validator checks every plan as a temporal
   plan of PDDL 2.1. The verifier reads plans with times and durations, with actions that
@@ -79,9 +80,11 @@ in [baseline.md](baseline.md).
 ## Known limits
 
 - Of time: plans are found with one durative action after another, and only then made
-  shorter. A problem that needs actions to overlap (one that needs what another gives only
-  while it runs) is reported as not supported, and so is one with no plan of that kind, never
-  as unsolvable. The searches order subtasks only by "ends before it starts": the other
+  shorter. Where that gives no plan (an action needs what another gives only while it runs),
+  the start and the end of each durative action are planned as two steps, and Kairos says when
+  each takes place; but that search does not look at durations, so an order of starts and ends
+  that no times fit is reported as not supported, as is a problem with no plan of either
+  kind, never as unsolvable. Not with timed initial literals. The searches order subtasks only by "ends before it starts": the other
   constraints on time points and on durations, and what a durative method asks over all and at
   end, are met by the times given to the plan found or the problem is reported as not
   supported. `?duration` inside conditions or effects and timed initial values of fluents are

@@ -31,6 +31,7 @@
 #include "state/registry.hpp"
 #include "state/successors.hpp"
 #include "temporal/compress.hpp"
+#include "temporal/snap.hpp"
 
 namespace klimax
 {
@@ -62,19 +63,19 @@ std::string instance(const hddl::Model & m, const verifier::Order::Action & step
   return out + ")";
 }
 
-}  // namespace
-
-std::vector<verifier::Timed> schedule(
-  const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
-  const std::vector<std::pair<uint32_t, uint32_t>> & precedences)
+// KLIMAX_TRACE_SCHEDULE: why the plan is left as it was
+std::vector<verifier::Timed> gave_up(const std::string & why)
 {
-  // KLIMAX_TRACE_SCHEDULE: why the plan is left with one action after another
-  auto gave_up = [](const std::string & why) {
-      if (std::getenv("KLIMAX_TRACE_SCHEDULE") != nullptr) {
-        std::fprintf(stderr, "schedule: %s\n", why.c_str());
-      }
-      return std::vector<verifier::Timed>();
-    };
+  if (std::getenv("KLIMAX_TRACE_SCHEDULE") != nullptr) {
+    std::fprintf(stderr, "schedule: %s\n", why.c_str());
+  }
+  return {};
+}
+
+// Kairos' task with only the instances of the actions that the plan uses
+std::optional<sas::Task> task_of(
+  const hddl::Model & model, const std::vector<verifier::Order::Action> & steps)
+{
   lifted::Task task = lifted::normalize(model.pddl, model.domain, model.problem, model.objects);
   // Only the instances that the plan uses are grounded: each action needs a fact that only
   // they have
@@ -112,14 +113,54 @@ std::vector<verifier::Timed> schedule(
   options.drop_useless_actions = false;
   auto ground = kairos::ground::ground(task, options);
   if (!ground.ok()) {
-    return gave_up("the actions of the plan cannot be grounded: " +
-             (ground.diagnostics().empty() ? std::string() : ground.diagnostics()[0].message));
+    gave_up("the actions of the plan cannot be grounded: " +
+      (ground.diagnostics().empty() ? std::string() : ground.diagnostics()[0].message));
+    return std::nullopt;
   }
   auto translated = sas::translate(task, std::move(ground).value());
   if (!translated.ok()) {
-    return gave_up("no SAS task");
+    gave_up("no SAS task");
+    return std::nullopt;
   }
-  const sas::Task & original = translated.value();
+  return std::move(translated).value();
+}
+
+// The times of the steps from Kairos' plan, which gives them in the order of time: those of
+// the same action, in the order of the plan
+std::vector<verifier::Timed> times_of(
+  const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
+  const kairos::Plan & plan)
+{
+  std::unordered_map<std::string, std::vector<const kairos::PlanStep *>> timed;
+  for (const kairos::PlanStep & p : plan.steps) {
+    timed[p.action()].push_back(&p);
+  }
+  std::unordered_map<std::string, size_t> taken;
+  std::vector<verifier::Timed> times;
+  for (const verifier::Order::Action & s : steps) {
+    const std::string name = instance(model, s);
+    const auto found = timed.find(name);
+    size_t & next = taken[name];
+    if (found == timed.end() || next >= found->second.size()) {
+      return gave_up("Kairos' plan has no step " + name);
+    }
+    const kairos::PlanStep & p = *found->second[next++];
+    times.push_back(verifier::Timed{p.time, p.duration});
+  }
+  return times;
+}
+
+}  // namespace
+
+std::vector<verifier::Timed> schedule(
+  const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
+  const std::vector<std::pair<uint32_t, uint32_t>> & precedences)
+{
+  const std::optional<sas::Task> grounded = task_of(model, steps);
+  if (!grounded) {
+    return {};
+  }
+  const sas::Task & original = *grounded;
   const kairos::temporal::Compressed compressed = kairos::temporal::compress(original);
   kairos::state::StateRegistry registry(compressed.task, nullptr, false);
   kairos::state::StateSpace space(compressed.task, registry);
@@ -153,25 +194,67 @@ std::vector<verifier::Timed> schedule(
   if (!plan || plan->steps.size() != steps.size()) {
     return gave_up("Kairos gives no schedule");
   }
-  // Kairos gives the steps in the order of time: those of the same action, in the order of
-  // the plan
-  std::unordered_map<std::string, std::vector<const kairos::PlanStep *>> timed;
-  for (const kairos::PlanStep & p : plan->steps) {
-    timed[p.action()].push_back(&p);
+  return times_of(model, steps, *plan);
+}
+
+std::vector<verifier::Timed> schedule(
+  const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
+  const std::vector<Happening> & happenings)
+{
+  const std::optional<sas::Task> grounded = task_of(model, steps);
+  if (!grounded) {
+    return {};
   }
-  std::unordered_map<std::string, size_t> taken;
-  std::vector<verifier::Timed> times;
-  for (const verifier::Order::Action & s : steps) {
-    const std::string name = instance(model, s);
-    const auto found = timed.find(name);
-    size_t & next = taken[name];
-    if (found == timed.end() || next >= found->second.size()) {
-      return {};
+  const sas::Task & original = *grounded;
+  const kairos::temporal::SnapTask snap = kairos::temporal::snap(original);
+  if (!snap.unsupported.empty()) {
+    return gave_up("Kairos does not time this task: " + snap.unsupported);
+  }
+  kairos::state::StateRegistry registry(snap.task, nullptr, false);
+  kairos::state::StateSpace space(snap.task, registry);
+  // The actions of the snap task by the name of the action they are of: the instantaneous
+  // ones, and the start of each durative one (its end comes next)
+  std::unordered_map<std::string, std::vector<uint32_t>> by_name;
+  for (uint32_t a = 0; a < original.actions.size(); ++a) {
+    by_name[sas::instance_name(original, original.actions[a])].push_back(a);
+  }
+  for (uint32_t d = 0; d < original.durative_actions.size(); ++d) {
+    by_name[sas::instance_name(original, original.durative_actions[d])].push_back(
+      static_cast<uint32_t>(snap.instant + 2 * d));
+  }
+  std::vector<uint32_t> actions;
+  std::vector<uint32_t> started(steps.size(), 0);  // the action each step started with
+  kairos::state::StateId state = registry.initial();
+  for (const Happening & h : happenings) {
+    std::optional<kairos::state::StateId> next;
+    if (h.end) {
+      next = space.successor(state, started[h.step] + 1);
+      if (next) {
+        actions.push_back(started[h.step] + 1);
+      }
+    } else if (const auto found = by_name.find(instance(model, steps[h.step]));
+      found != by_name.end())
+    {
+      for (uint32_t a : found->second) {
+        if ((next = space.successor(state, a))) {
+          actions.push_back(a);
+          started[h.step] = a;
+          break;
+        }
+      }
     }
-    const kairos::PlanStep & p = *found->second[next++];
-    times.push_back(verifier::Timed{p.time, p.duration});
+    if (!next) {
+      return gave_up(std::string(h.end ? "the end of " : "the start of ") +
+               instance(model, steps[h.step]) + " cannot be replayed");
+    }
+    state = *next;
   }
-  return times;
+  kairos::temporal::TemporalFilter filter(original, snap, space, 0.001);
+  const std::optional<kairos::Plan> plan = filter.plan(actions);
+  if (!plan || plan->steps.size() != steps.size()) {
+    return gave_up("Kairos finds no times for the starts and the ends in this order");
+  }
+  return times_of(model, steps, *plan);
 }
 
 }  // namespace klimax

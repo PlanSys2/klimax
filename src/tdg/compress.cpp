@@ -15,6 +15,8 @@
 
 #include "tdg/compress.hpp"
 
+#include "hddl/split.hpp"
+
 #include <algorithm>
 #include <set>
 #include <utility>
@@ -159,6 +161,107 @@ std::string one(const lifted::DurativeAction & d, lifted::Action & a)
 }
 
 }  // namespace
+
+std::string start_and_end(kairos::lifted::Task & task)
+{
+  if (!task.timed_events.empty()) {
+    return "timed initial literals in a problem whose actions must overlap";
+  }
+  std::vector<lifted::Action> made;
+  for (const lifted::DurativeAction & d : task.durative_actions) {
+    const std::string who = "durative action " + d.name + ": ";
+    std::set<uint32_t> read;
+    if (reads(d.at_start, read) || reads(d.over_all, read) || reads(d.at_end, read)) {
+      return who + "?duration in a condition";
+    }
+    lifted::Action start;
+    lifted::Action end;
+    start.name = d.name;
+    end.name = hddl::end_of(d.name);
+    start.variables = d.variables;
+    start.parameters = d.parameters;
+    start.hidden = d.hidden;
+    // The end has the parameters only: nothing else says which start it ends
+    end.variables.assign(d.variables.begin(), d.variables.begin() + d.parameters);
+    end.parameters = d.parameters;
+    auto only_parameters = [&](const lifted::Condition & c) {
+        auto in = [&](const lifted::Term & t) {
+            return t.kind != lifted::Term::Kind::Variable || t.index < d.parameters;
+          };
+        for (const lifted::Literal & l : c.literals) {
+          if (!std::all_of(l.atom.args.begin(), l.atom.args.end(), in)) {
+            return false;
+          }
+        }
+        return c.foralls.empty() && std::all_of(c.comparisons.begin(), c.comparisons.end(),
+                 [&](const lifted::Comparison & k) {
+                   return !k.objects && k.lhs.children.empty() && k.rhs.children.empty() &&
+                          std::all_of(k.lhs.args.begin(), k.lhs.args.end(), in) &&
+                          std::all_of(k.rhs.args.begin(), k.rhs.args.end(), in);
+                 });
+      };
+    if (!only_parameters(d.at_end) || !only_parameters(d.over_all)) {
+      return who + "a condition at end or over all that is not over its parameters alone";
+    }
+    std::vector<kairos::sem::TypeSpec> types;
+    lifted::Literal running;
+    for (uint32_t v = 0; v < d.parameters; ++v) {
+      types.push_back(d.variables[v].types);
+      running.atom.args.push_back(lifted::Term::variable(v));
+    }
+    running.atom.predicate = task.add_predicate("klimax-running " + d.name, false, types);
+    start.precondition = d.at_start;
+    end.precondition = d.at_end;
+    for (const lifted::Literal & l : d.over_all.literals) {
+      const bool given = std::any_of(d.effects.begin(), d.effects.end(),
+          [&](const lifted::Effect & e) {
+            return e.timing != lifted::Timing::End && e.variables.empty() &&
+                   e.condition.empty() && e.atom == l.atom &&
+                   e.kind == (l.positive ? lifted::Effect::Kind::Add :
+                   lifted::Effect::Kind::Delete);
+          });
+      if (!given) {
+        start.precondition.literals.push_back(l);
+      }
+      end.precondition.literals.push_back(l);
+    }
+    for (const lifted::Comparison & k : d.over_all.comparisons) {
+      end.precondition.comparisons.push_back(k);
+    }
+    lifted::Literal idle = running;
+    idle.positive = false;
+    start.precondition.literals.push_back(idle);
+    end.precondition.literals.push_back(running);
+    for (const lifted::Effect & e : d.effects) {
+      std::set<uint32_t> in_effect;
+      if (e.continuous || reads(e.condition, in_effect) || reads(e.start_condition, in_effect) ||
+        uses_duration(e.value))
+      {
+        return who + "?duration or continuous change in an effect";
+      }
+      const bool at_end = e.timing == lifted::Timing::End;
+      if (at_end && (!e.start_condition.empty() || !only_parameters(e.condition))) {
+        return who + "a conditional effect at end";
+      }
+      lifted::Effect instant = e;
+      instant.timing = lifted::Timing::Instant;
+      (at_end ? end : start).effects.push_back(std::move(instant));
+    }
+    lifted::Effect runs;
+    runs.kind = lifted::Effect::Kind::Add;
+    runs.atom = running.atom;
+    start.effects.push_back(runs);
+    runs.kind = lifted::Effect::Kind::Delete;
+    end.effects.push_back(runs);
+    made.push_back(std::move(start));
+    made.push_back(std::move(end));
+  }
+  for (lifted::Action & a : made) {
+    task.actions.push_back(std::move(a));
+  }
+  task.durative_actions.clear();
+  return "";
+}
 
 std::string clock(
   kairos::lifted::Task & task, const std::function<bool(const std::string &)> & step)

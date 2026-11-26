@@ -115,6 +115,32 @@ std::string light(const std::string & subtasks)
 const char * kStudy = "(define (problem p) (:domain d)\n"
   "(:htn :subtasks (and (study))) (:init) (:goal (read)))";
 
+TEST(TemporalTest, DurationInConditionsAndEffects)
+{
+  // A battery that working drains by twice what the work lasts, and that must last for it
+  const char * domain =
+    "(define (domain d) (:requirements :typing :hierarchy :durative-actions :numeric-fluents)\n"
+    " (:types worker)\n"
+    " (:predicates (done ?w - worker))\n"
+    " (:functions (battery) (pace ?w - worker))\n"
+    " (:task job :parameters (?w - worker))\n"
+    " (:method m :parameters (?w - worker) :task (job ?w) :ordered-subtasks (and (work ?w)))\n"
+    " (:durative-action work :parameters (?w - worker) :duration (= ?duration (pace ?w))\n"
+    "  :condition (and (at start (>= (battery) (* 2 ?duration))))\n"
+    "  :effect (and (at end (decrease (battery) (* 2 ?duration))) (at end (done ?w)))))";
+  auto problem = [](const std::string & battery) {
+      return "(define (problem p) (:domain d) (:objects ann bob - worker)\n"
+             "(:htn :ordered-subtasks (and (job ann) (job bob)))\n"
+             "(:init (= (battery) " + battery + ") (= (pace ann) 3) (= (pace bob) 2))\n"
+             "(:goal (and (done ann) (done bob))))";
+    };
+  // 2 * 3 + 2 * 2 = 10
+  SolveResult r = solve(domain, problem("10"));
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  EXPECT_TRUE(verify(domain, problem("10"), r.plan).valid);
+  EXPECT_NE(solve(domain, problem("9")).status, Status::Solved);
+}
+
 TEST(TemporalTest, ActionsThatMustOverlap)
 {
   // With one action after another there is no plan: looking needs the light, which is on

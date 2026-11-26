@@ -87,8 +87,10 @@ in [baseline.md](baseline.md).
   kind, never as unsolvable. Not with timed initial literals. The searches order subtasks only by "ends before it starts": the other
   constraints on time points and on durations, and what a durative method asks over all and at
   end, are met by the times given to the plan found or the problem is reported as not
-  supported. `?duration` inside conditions or effects and timed initial values of fluents are
-  not read yet. An action that reads an atom of a timed initial
+  supported. Timed initial values of fluents and continuous change (`#t`) are not read yet;
+  `?duration` inside conditions and effects is, with the duration the action is planned with
+  (what it is equal to, or else the least it allows). An action that reads an atom of a timed
+  initial
   literal is planned as needing it from its start to its end, whatever the domain says: some
   plans are not found. The verifier does follow
   plans whose actions overlap.

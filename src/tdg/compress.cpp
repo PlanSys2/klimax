@@ -35,6 +35,60 @@ bool uses_duration(const lifted::Expr & e)
          std::any_of(e.children.begin(), e.children.end(), uses_duration);
 }
 
+// ?duration in `e` as `value`
+void substitute(lifted::Expr & e, const lifted::Expr & value)
+{
+  if (e.op == lifted::ExprOp::Duration) {
+    e = value;
+    return;
+  }
+  for (lifted::Expr & c : e.children) {
+    substitute(c, value);
+  }
+}
+
+void substitute(lifted::Condition & c, const lifted::Expr & value)
+{
+  for (lifted::Comparison & k : c.comparisons) {
+    substitute(k.lhs, value);
+    substitute(k.rhs, value);
+  }
+  for (lifted::Quantified & q : c.foralls) {
+    substitute(q.body, value);
+  }
+}
+
+// ?duration in the conditions and effects of `d` as what it lasts: what its duration is equal
+// to, or else the least it allows, or else the most (as Kairos' engine for temporally simple
+// tasks does). The reason if its duration says nothing
+std::string fixed_duration(lifted::DurativeAction & d)
+{
+  const lifted::DurationConstraint * chosen = nullptr;
+  for (const lifted::DurationConstraint & c : d.duration) {
+    const bool better = chosen == nullptr || c.op == lifted::CompareOp::Eq ||
+      (c.op == lifted::CompareOp::Ge && chosen->op == lifted::CompareOp::Le);
+    if (better) {
+      chosen = &c;
+    }
+  }
+  if (chosen == nullptr) {
+    return "durative action " + d.name + ": a duration with no value or bound";
+  }
+  const lifted::Expr value = chosen->value;
+  if (uses_duration(value)) {
+    return "durative action " + d.name + ": a duration that reads ?duration";
+  }
+  for (lifted::Condition * c : {&d.at_start, &d.over_all, &d.at_end}) {
+    substitute(*c, value);
+  }
+  for (lifted::Effect & e : d.effects) {
+    substitute(e.condition, value);
+    substitute(e.start_condition, value);
+    substitute(e.value, value);
+  }
+  return "";
+}
+
 void functions(const lifted::Expr & e, std::set<uint32_t> & out)
 {
   if (e.op == lifted::ExprOp::Fluent) {
@@ -84,7 +138,7 @@ std::string one(const lifted::DurativeAction & d, lifted::Action & a)
     }
     std::set<uint32_t> read;
     if (reads(e.condition, read) || reads(e.start_condition, read) || uses_duration(e.value)) {
-      return who + "?duration in an effect";
+      return who + "continuous change (#t) in an effect";
     }
     if (e.timing != lifted::Timing::End) {
       start.push_back(&e);
@@ -102,13 +156,13 @@ std::string one(const lifted::DurativeAction & d, lifted::Action & a)
     };
   std::set<uint32_t> read;
   if (reads(d.at_start, read)) {
-    return who + "?duration in a condition";
+    return who + "continuous change (#t) in a condition";
   }
   a.precondition = d.at_start;
   for (const lifted::Condition * later : {&d.over_all, &d.at_end}) {
     std::set<uint32_t> after;
     if (reads(*later, after)) {
-      return who + "?duration in a condition";
+      return who + "continuous change (#t) in a condition";
     }
     if (std::any_of(after.begin(), after.end(),
       [&](uint32_t f) {return changed_at_start.count(f) != 0;}))
@@ -168,11 +222,14 @@ std::string start_and_end(kairos::lifted::Task & task)
     return "timed initial literals in a problem whose actions must overlap";
   }
   std::vector<lifted::Action> made;
-  for (const lifted::DurativeAction & d : task.durative_actions) {
+  for (lifted::DurativeAction d : task.durative_actions) {
+    if (std::string why = fixed_duration(d); !why.empty()) {
+      return why;
+    }
     const std::string who = "durative action " + d.name + ": ";
     std::set<uint32_t> read;
     if (reads(d.at_start, read) || reads(d.over_all, read) || reads(d.at_end, read)) {
-      return who + "?duration in a condition";
+      return who + "continuous change (#t) in a condition";
     }
     lifted::Action start;
     lifted::Action end;
@@ -237,7 +294,7 @@ std::string start_and_end(kairos::lifted::Task & task)
       if (e.continuous || reads(e.condition, in_effect) || reads(e.start_condition, in_effect) ||
         uses_duration(e.value))
       {
-        return who + "?duration or continuous change in an effect";
+        return who + "continuous change (#t) in an effect";
       }
       const bool at_end = e.timing == lifted::Timing::End;
       if (at_end && (!e.start_condition.empty() || !only_parameters(e.condition))) {
@@ -314,8 +371,11 @@ std::string clock(
 std::string compress(kairos::lifted::Task & task)
 {
   std::vector<lifted::Action> made;
-  for (const lifted::DurativeAction & d : task.durative_actions) {
+  for (lifted::DurativeAction d : task.durative_actions) {
     made.emplace_back();
+    if (std::string why = fixed_duration(d); !why.empty()) {
+      return why;
+    }
     if (std::string why = one(d, made.back()); !why.empty()) {
       return why;
     }

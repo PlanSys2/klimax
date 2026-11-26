@@ -176,10 +176,12 @@ Anything outside this is an error with file, line and column, never a silent app
   the decomposition lines), so that the IPC verifier can check Klimax's plans.
   As that verifier requires, the subtask ids of a decomposition line, and those of `root`, are
   written in an order the task network allows (each id after the ids ordered before it).
-- L3 and L4: **[decision]** the same format with a time and a duration for every primitive step
-  (`time: (action args) [duration]`, as in PDDL 2.1 plans) and the same decomposition lines. No
-  standard exists; this one keeps both the IPC HTN tools and the PDDL temporal validators usable
-  on the part each understands.
+- L3 and L4: **[decision]** the same format with a time and a duration for every primitive step,
+  `id time: (action args) [duration]`: after the id, the line of a PDDL 2.1 plan. The
+  decomposition lines are the same. No standard exists; with the ids taken off, the steps are a
+  plan that the PDDL temporal validators read, and with the times taken off, one that the IPC HTN
+  tools read. The verifier also takes a plan without times, and gives its actions one after
+  another.
 
 ## 6. Open questions
 

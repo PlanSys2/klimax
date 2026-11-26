@@ -116,6 +116,7 @@ struct VerifyResult
   // Of a valid plan, the value of the problem's :metric at its end (none: no metric, one over
   // time, or one that reads a fluent with no value)
   std::optional<double> metric;
+  std::optional<double> makespan;  // of a valid plan with durative actions: when it ends
   // With `decomposition`, of a valid plan: every step, the actions in the order of execution
   // and the tasks of the initial task network (ids, with the labels the problem gives them)
   std::vector<PlanStep> steps_of_plan;

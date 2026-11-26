@@ -80,6 +80,9 @@ struct SolveResult
   // The value of the problem's :metric at the end of the plan (none: no metric, or one over
   // time)
   std::optional<double> cost;
+  // With durative actions: when the plan ends. Its actions then have a time and a duration,
+  // "id time: (action args) [duration]", one after another
+  std::optional<double> makespan;
   double ground_ms = 0.0;
   double search_ms = 0.0;
   uint64_t expansions = 0;

@@ -27,6 +27,7 @@ add_library(klimax_objects OBJECT
   search/lifted.cpp
   search/sat.cpp
   search/total_order.cpp
+  tdg/compress.cpp
   tdg/grounder.cpp
   tdg/object_fluents.cpp
   verify/verifier.cpp

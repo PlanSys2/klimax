@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <new>
@@ -290,6 +291,39 @@ GroundResult ground(
   return result;
 }
 
+// The plan with the time and the duration of each action: "id time: (action args) [duration]",
+// the line of a PDDL 2.1 plan after the id. `times` in the order of the actions; none: as it is
+std::string with_times(const std::string & plan, const std::vector<verifier::Timed> & times)
+{
+  if (times.empty()) {
+    return plan;
+  }
+  std::istringstream in(plan);
+  std::string out;
+  size_t step = 0;
+  bool actions = false;
+  char number[64];
+  for (std::string line; std::getline(in, line); ) {
+    if (line.rfind("root", 0) == 0) {
+      actions = false;
+    }
+    const size_t space = line.find(' ');
+    if (actions && space != std::string::npos && step < times.size()) {
+      std::snprintf(number, sizeof(number), "%.3f", times[step].time);
+      out += line.substr(0, space + 1) + number + ": (" + line.substr(space + 1) + ") [";
+      std::snprintf(number, sizeof(number), "%.3f", times[step].duration);
+      out += std::string(number) + "]\n";
+      ++step;
+    } else {
+      out += line + "\n";
+    }
+    if (line.rfind("==>", 0) == 0) {
+      actions = true;
+    }
+  }
+  return out;
+}
+
 SolveResult solve(
   std::string_view domain, std::string_view problem, const SolveOptions & options,
   std::string_view domain_file, std::string_view problem_file)
@@ -313,15 +347,7 @@ SolveResult solve(
     result.message = "a problem without :htn is a PDDL problem: use Kairos";
     return result;
   }
-  // Time is not planned with yet: said so, never answered as if the actions were not there
-  if (!model->pddl.durative_actions.empty() ||
-    std::any_of(model->problem.init.begin(), model->problem.init.end(),
-    [](const kairos::ast::InitItem & item) {return item.time.has_value();}))
-  {
-    result.status = Status::Unsupported;
-    result.message = "durative actions and timed initial literals";
-    return result;
-  }
+  const bool temporal = !model->pddl.durative_actions.empty();
   using Clock = kairos::BudgetConfig::Clock;
   auto seconds_since = [&](Clock::time_point t) {
       return std::chrono::duration<double>(Clock::now() - t).count();
@@ -474,9 +500,15 @@ SolveResult solve(
         how.anytime = options.anytime;
         if (options.on_plan) {
           how.on_plan = [&](const std::string & plan, size_t steps) {
-              // Only plans that the verifier accepts leave the library
-              if (!options.verify || verifier::verify(model.value(), plan).valid) {
-                options.on_plan(with_original_names(plan, spelling_of(domain, problem)), steps);
+              // Only plans that the verifier accepts leave the library. With durative actions
+              // it is also who times the plan
+              const bool check = options.verify || temporal;
+              const verifier::Outcome checked =
+                check ? verifier::verify(model.value(), plan) : verifier::Outcome{true, "", {}, {}};
+              if (checked.valid) {
+                options.on_plan(with_times(
+                    with_original_names(plan, spelling_of(domain, problem)), checked.times),
+                  steps);
               }
             };
         }
@@ -537,18 +569,34 @@ SolveResult solve(
       {
         const Spelling spelling = spelling_of(domain, problem);
         result.plan = with_original_names(found.plan, spelling);
-        // The verifier is also who values a plan of a search that does not (found.cost)
-        if (options.verify || options.decomposition ||
+        // The verifier is also who values a plan of a search that does not (found.cost), and
+        // who times a plan with durative actions
+        if (options.verify || options.decomposition || temporal ||
           (model.value().problem.metric && !found.cost))
         {
           verifier::Tree tree;
           const verifier::Outcome checked = verifier::verify(
             model.value(), found.plan, options.decomposition ? &tree : nullptr);
+          if (!checked.valid && temporal) {
+            // Found taking each durative action as one step: where that is not enough (an
+            // action needs what another gives only while it runs) the plan is not one
+            result.status = Status::Unsupported;
+            result.message = checked.reason.rfind("unsupported: ", 0) == 0 ?
+              checked.reason.substr(13) :
+              "the plan found with each durative action as one step is not valid (" +
+              checked.reason + "): actions that must overlap are not planned yet";
+            result.plan.clear();
+            break;
+          }
           if (!checked.valid) {
             result.status = Status::InternalError;
             result.message = "the plan found is not valid: " + checked.reason;
             result.plan.clear();
             break;
+          }
+          if (!checked.times.empty()) {
+            result.plan = with_times(result.plan, checked.times);
+            result.makespan = checked.times.back().time + checked.times.back().duration;
           }
           if (checked.metric && found.cost && std::abs(*checked.metric - *found.cost) >
             1e-6 * std::max(1.0, std::abs(*checked.metric)))
@@ -567,6 +615,12 @@ SolveResult solve(
       break;
     case search::Outcome::Unsolvable:
       result.status = Status::Unsolvable;
+      if (temporal) {
+        // Only of the plans with one durative action after another
+        result.status = Status::Unsupported;
+        result.message = "no plan with each durative action as one step: actions that must "
+          "overlap are not planned yet";
+      }
       break;
     case search::Outcome::OutOfBudget:
       result.status = Status::Timeout;
@@ -615,6 +669,12 @@ VerifyResult verify(
   result.valid = outcome.valid;
   result.reason = std::move(outcome.reason);
   result.metric = outcome.metric;
+  if (!outcome.times.empty()) {
+    result.makespan = 0.0;
+    for (const verifier::Timed & t : outcome.times) {
+      result.makespan = std::max(*result.makespan, t.time + t.duration);
+    }
+  }
   if (result.valid && decomposition) {
     fill(result, tree, spelling_of(domain, problem));
   }

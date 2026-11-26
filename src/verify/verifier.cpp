@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "validate/validator.hpp"
 #include "validate/world.hpp"
 #include "verify/interpreter.hpp"
 
@@ -46,6 +47,8 @@ struct PlanLine
   bool abstract = false;
   std::string method;
   std::vector<std::string> children;
+  std::optional<double> time;      // "id time: (action args) [duration]"
+  std::optional<double> duration;
 };
 
 struct PlanText
@@ -103,10 +106,30 @@ PlanText read_plan(std::string_view text)
       plan.roots.assign(w.begin() + 1, w.end());
       continue;
     }
+    PlanLine entry;
+    // A step with its time: "id time: name args [duration]"
+    if (w.size() >= 2 && w[1].back() == ':') {
+      auto number = [&](std::string digits) {
+          try {
+            size_t used = 0;
+            const double value = std::stod(digits, &used);
+            if (used == digits.size() && value >= 0.0) {
+              return value;
+            }
+          } catch (const std::exception &) {
+          }
+          invalid("plan line '" + line + "': '" + digits + "' is not a time");
+        };
+      entry.time = number(w[1].substr(0, w[1].size() - 1));
+      w.erase(w.begin() + 1);
+      if (w.back().size() > 2 && w.back().front() == '[' && w.back().back() == ']') {
+        entry.duration = number(w.back().substr(1, w.back().size() - 2));
+        w.pop_back();
+      }
+    }
     if (w.size() < 2) {
       invalid("plan line '" + line + "' has no task");
     }
-    PlanLine entry;
     entry.id = w[0];
     entry.name = w[1];
     auto arrow = std::find(w.begin() + 2, w.end(), "->");
@@ -180,10 +203,8 @@ public:
     if (!m_.has_htn) {
       invalid("unsupported: a problem without :htn is a PDDL problem");
     }
-    if (!m_.pddl.durative_actions.empty() || !m_.pddl.derived.empty() ||
-      m_.problem.constraints.valid() || m_.pddl.constraints.valid())
-    {
-      invalid("unsupported: durative actions, derived predicates or trajectory constraints");
+    if (!m_.pddl.derived.empty() || m_.problem.constraints.valid() || m_.pddl.constraints.valid()) {
+      invalid("unsupported: derived predicates or trajectory constraints");
     }
     for (size_t i = 0; i < m_.tasks.size(); ++i) {
       task_index_.emplace(m_.tasks[TaskId(static_cast<uint32_t>(i))].name, i);
@@ -206,6 +227,9 @@ public:
 
   // The plan as its decomposition, once run() has accepted it
   std::optional<double> metric() const {return metric_;}
+
+  /// The time and the duration of every action, if some action is durative
+  std::vector<Timed> times() const {return temporal_ ? times_ : std::vector<Timed>();}
 
   Tree tree() const
   {
@@ -298,7 +322,16 @@ private:
         n.args.push_back(o->value());
       }
       n.primitive = info.primitive;
+      if (line.time && !n.primitive) {
+        invalid("step " + line.id + ": only actions have a time");
+      }
       if (n.primitive) {
+        timed_ = timed_ || line.time.has_value();
+        if (timed_ != line.time.has_value()) {
+          invalid("step " + line.id + ": either every action has a time or none");
+        }
+        times_.push_back(Timed{line.time.value_or(0.0), line.duration.value_or(0.0)});
+        durations_given_.push_back(line.duration.has_value());
         n.position = position++;
         sequence_.push_back(static_cast<uint32_t>(nodes_.size()));
       } else {
@@ -767,6 +800,133 @@ private:
     }
   }
 
+  // A durative action that no other overlaps: its conditions at start, its effects at start,
+  // its conditions over all and at end, its effects at end
+  void durative(const ast::DurativeAction & a, val::Bindings & env, const Node & n, Timed & when)
+  {
+    for (size_t p = 0; p < a.params.size(); ++p) {
+      env.emplace_back(a.params[p].name, n.args[p]);
+    }
+    if (!durations_given_[n.position]) {
+      when.duration = duration(a, env, n);
+    }
+    using Ctx = val::Evaluator::Ctx;
+    Ctx lasting{state_, nullptr, val::Phase::Instant, when.duration};
+    lasting.duration_check = true;
+    try {
+      if (a.duration.valid() && !world_.domain_eval.holds(a.duration, lasting, env)) {
+        invalid("step " + show(n) + " does not last what its duration says");
+      }
+    } catch (const val::EvalError & e) {
+      invalid("step " + show(n) + ": its duration cannot be computed: " + e.message);
+    } catch (const val::Unsupported & u) {
+      invalid("unsupported: " + u.message);
+    }
+    auto check = [&](val::Phase phase, const val::State * start, const char * which) {
+        const Ctx c{state_, start, phase, when.duration};
+        bool ok = false;
+        try {
+          ok = !a.condition.valid() || world_.domain_eval.holds(a.condition, c, env);
+        } catch (const val::EvalError &) {
+          ok = false;
+        } catch (const val::Unsupported & u) {
+          invalid("unsupported: " + u.message);
+        }
+        if (!ok) {
+          invalid("step " + show(n) + " is not applicable: its condition " + which +
+            " does not hold");
+        }
+      };
+    check(val::Phase::Start, nullptr, "at start");
+    // Effects at end may depend on the state at start
+    std::optional<val::State> before;
+    if (a.effect.valid() && world_.domain_eval.has_when(a.effect)) {
+      before = state_;
+    }
+    if (a.effect.valid()) {
+      apply(a.effect, Ctx{state_, nullptr, val::Phase::Start, when.duration}, env, n);
+    }
+    const val::State * start = before ? &*before : nullptr;
+    check(val::Phase::Invariant, start, "over all");
+    check(val::Phase::End, start, "at end");
+    if (a.effect.valid()) {
+      apply(a.effect, Ctx{state_, start, val::Phase::End, when.duration}, env, n);
+    }
+  }
+
+  // What a durative action lasts when the plan does not say: what its duration is equal to,
+  // or else the least it allows, or else the most
+  double duration(const ast::DurativeAction & a, val::Bindings & env, const Node & n)
+  {
+    std::optional<double> equal, least, most;
+    std::vector<ast::FormulaId> pending;
+    if (a.duration.valid()) {
+      pending.push_back(a.duration);
+    }
+    const ast::Nodes & nodes = m_.pddl.nodes;
+    try {
+      while (!pending.empty()) {
+        const ast::Formula & f = nodes.formulas[pending.back()];
+        pending.pop_back();
+        if (f.kind != ast::FormulaKind::Compare) {
+          pending.insert(pending.end(), f.children.begin(), f.children.end());
+          continue;
+        }
+        const bool left = nodes.exprs[f.lhs].kind == ast::ExprKind::Duration;
+        if (!left && nodes.exprs[f.rhs].kind != ast::ExprKind::Duration) {
+          continue;
+        }
+        const double value = world_.domain_eval.number(
+          left ? f.rhs : f.lhs, val::Evaluator::Ctx{state_}, env);
+        // ?duration on the right turns the comparison round
+        const bool lower = (f.compare == ast::CompareOp::Ge || f.compare == ast::CompareOp::Gt) ==
+          left;
+        if (f.compare == ast::CompareOp::Eq) {
+          equal = value;
+        } else if (lower) {
+          least = std::max(least.value_or(value), value);
+        } else {
+          most = std::min(most.value_or(value), value);
+        }
+      }
+    } catch (const val::EvalError & e) {
+      invalid("step " + show(n) + ": its duration cannot be computed: " + e.message);
+    } catch (const val::Unsupported & u) {
+      invalid("unsupported: " + u.message);
+    }
+    return equal ? *equal : least ? *least : most.value_or(0.0);
+  }
+
+  // The actions with their times, as Kairos' validator checks a temporal plan: the rules of
+  // PDDL 2.1 on what happens at the same time, which following the plan step by step does
+  // not look at
+  void validate_times()
+  {
+    kairos::Plan plan;
+    plan.temporal = true;
+    for (uint32_t index : sequence_) {
+      const Node & n = nodes_[index];
+      kairos::PlanStep step;
+      step.time = times_[n.position].time;
+      step.duration = times_[n.position].duration;
+      step.name = lowered(m_.tasks[n.task].name);
+      for (uint32_t o : n.args) {
+        step.args.push_back(lowered(object(o).name));
+      }
+      plan.steps.push_back(std::move(step));
+    }
+    const kairos::ValidationReport report = val::validate(
+      m_.pddl, m_.domain, m_.problem, m_.objects, plan, kairos::ValidateOptions{});
+    if (report.status == kairos::ValidationStatus::Unsupported) {
+      invalid("unsupported: " + (report.diagnostics.empty() ? std::string("this plan") :
+        report.diagnostics[0].message));
+    }
+    if (!report.valid()) {
+      invalid("as a temporal plan: " + (report.diagnostics.empty() ? std::string("not valid") :
+        report.diagnostics[0].message));
+    }
+  }
+
   // Comparisons as written: the searches compare so
   static const kairos::ValidateOptions & exact()
   {
@@ -779,11 +939,14 @@ private:
   }
 
   // The effects of a step, all read in the state before it
-  void apply(const ast::Action & a, val::Bindings & env, const Node & n)
+  void apply(
+    ast::EffectId effect, const val::Evaluator::Ctx & context, val::Bindings & env,
+    const Node & n)
   {
     val::Changes changes;
     try {
-      world_.domain_eval.effects(a.effect, val::Evaluator::Ctx{state_}, env, true, changes);
+      world_.domain_eval.effects(
+        effect, context, env, context.phase == val::Phase::Instant, changes);
     } catch (const val::EvalError &) {
       invalid("step " + show(n) + " is not applicable: it reads a number with no value");
     } catch (const val::Unsupported & u) {
@@ -895,17 +1058,34 @@ private:
       if (events_[n.start].pending != 0) {
         invalid("step " + show(n) + " comes too early: " + blocker(n.start));
       }
-      const ast::Action & a = m_.pddl.actions[m_.tasks[n.task].action];
+      Timed & when = times_[n.position];
+      // One step after another: a plan with steps that overlap is not followed yet
+      if (!timed_) {
+        when.time = n.position == 0 ? 0.0 : clock_ + kEpsilon;
+      } else if (n.position != 0 && when.time < clock_ - 1e-9) {
+        invalid("unsupported: step " + show(n) + " starts before the one before it ends");
+      }
       env.clear();
-      for (size_t p = 0; p < a.params.size(); ++p) {
-        env.emplace_back(a.params[p].name, n.args[p]);
+      if (m_.tasks[n.task].durative) {
+        temporal_ = true;
+        durative(m_.pddl.durative_actions[m_.tasks[n.task].action], env, n, when);
+      } else {
+        const ast::Action & a = m_.pddl.actions[m_.tasks[n.task].action];
+        for (size_t p = 0; p < a.params.size(); ++p) {
+          env.emplace_back(a.params[p].name, n.args[p]);
+        }
+        if (a.precondition.valid() && !holds(world_.domain_eval, a.precondition, env)) {
+          invalid("step " + show(n) + " is not applicable: its precondition does not hold");
+        }
+        if (a.effect.valid()) {
+          apply(a.effect, val::Evaluator::Ctx{state_}, env, n);
+        }
+        if (timed_ && when.duration != 0.0) {
+          invalid("step " + show(n) + " is an action without duration");
+        }
+        when.duration = 0.0;
       }
-      if (a.precondition.valid() && !holds(world_.domain_eval, a.precondition, env)) {
-        invalid("step " + show(n) + " is not applicable: its precondition does not hold");
-      }
-      if (a.effect.valid()) {
-        apply(a, env, n);
-      }
+      clock_ = when.time + when.duration;
       place(n.start);
       settle();
     }
@@ -922,6 +1102,9 @@ private:
       if (!holds(world_.problem_eval, m_.problem.goal, env)) {
         invalid("the goal does not hold at the end of the plan");
       }
+    }
+    if (temporal_) {
+      validate_times();
     }
     // The metric, in the state the plan ends in. Time is not read yet: no value then
     if (m_.problem.metric && !uses_time(m_.problem.metric->expr)) {
@@ -986,6 +1169,12 @@ private:
   std::vector<uint32_t> waiting_;   // tests whose predecessors are placed
   size_t placed_ = 0;
   val::State state_;
+  static constexpr double kEpsilon = 0.001;  // between a step and the next, as in PDDL 2.1
+  std::vector<Timed> times_;           // of the actions, in plan order
+  std::vector<bool> durations_given_;  // by the plan
+  bool timed_ = false;     // the plan gives the times
+  bool temporal_ = false;  // some action is durative
+  double clock_ = 0.0;     // when the last step ended
   std::optional<double> metric_;
 };
 
@@ -999,9 +1188,9 @@ Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree)
     if (tree != nullptr) {
       *tree = verifier.tree();
     }
-    return Outcome{true, "", verifier.metric()};
+    return Outcome{true, "", verifier.metric(), verifier.times()};
   } catch (const Invalid & e) {
-    return Outcome{false, e.reason, std::nullopt};
+    return Outcome{false, e.reason, std::nullopt, {}};
   }
 }
 

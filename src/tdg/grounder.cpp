@@ -30,6 +30,7 @@
 #include "ground/datalog.hpp"
 #include "ground/grounder.hpp"
 #include "hddl/split.hpp"
+#include "tdg/compress.hpp"
 #include "tdg/object_fluents.hpp"
 #include "normalize/normalizer.hpp"
 
@@ -80,6 +81,11 @@ public:
           std::chrono::steady_clock::now() - start).count();
       };
     lifted_ = kairos::lifted::normalize(m_.pddl, m_.domain, m_.problem, m_.objects);
+    // Time: each durative action as one step, the plan timed afterwards (check.cpp)
+    if (std::string why = compress(lifted_); !why.empty()) {
+      return kairos::Result<Problem>::failure(
+        {kairos::Diagnostic::error("ground.unsupported", "not planned with yet: " + why)});
+    }
     try {
       program();
       const bool solved = prog_.solve(budget_);
@@ -201,7 +207,7 @@ private:
 
   bool is_abstract(TaskId id) const
   {
-    return !m_.tasks[id].primitive || m_.tasks[id].durative;
+    return !m_.tasks[id].primitive;
   }
 
   // The unary predicate of the objects of a type, for variables nothing else binds
@@ -434,8 +440,8 @@ private:
     }
     for (uint32_t t = 0; t < m_.tasks.size(); ++t) {
       const hddl::TaskInfo & info = m_.tasks[TaskId(t)];
-      if (info.primitive && !info.durative) {
-        projections(action_name(info.action), task_predicate_[t]);
+      if (info.primitive) {
+        projections(action_name(info), task_predicate_[t]);
       }
     }
     for (uint32_t i = 0; i < m_.methods.size(); ++i) {
@@ -466,18 +472,16 @@ private:
       const uint32_t need = need_predicate_.at({task, mask});
       const hddl::TaskInfo & info = m_.tasks[TaskId(task)];
       if (info.primitive) {
-        if (!info.durative) {
-          // The parameters of an action are its first variables
-          datalog::Atom needed;
-          needed.predicate = need;
-          for (uint32_t c = 0; c < info.params.size(); ++c) {
-            if ((mask >> c) & 1u) {
-              needed.args.push_back(datalog::Term::var(c));
-            }
+        // The parameters of an action are its first variables
+        datalog::Atom needed;
+        needed.predicate = need;
+        for (uint32_t c = 0; c < info.params.size(); ++c) {
+          if ((mask >> c) & 1u) {
+            needed.args.push_back(datalog::Term::var(c));
           }
-          for (uint32_t k : copies_[action_name(info.action)]) {
-            applicable(k, &needed, 0);
-          }
+        }
+        for (uint32_t k : copies_[action_name(info)]) {
+          applicable(k, &needed, 0);
         }
         continue;
       }
@@ -519,6 +523,14 @@ private:
         }
       }
     }
+  }
+
+  // Of a primitive task: its action, durative or not
+  std::string action_name(const hddl::TaskInfo & info) const
+  {
+    return info.durative ?
+           std::string(m_.pddl.symbols.name(m_.pddl.durative_actions[info.action].name)) :
+           action_name(info.action);
   }
 
   std::string action_name(uint32_t action) const
@@ -851,8 +863,8 @@ private:
     std::map<std::string, std::unordered_set<Row, RowHash>> used;
     for (const Task & t : p_.tasks) {
       const hddl::TaskInfo & info = m_.tasks[t.task];
-      if (info.primitive && !info.durative) {
-        used[action_name(info.action)].insert(t.args);
+      if (info.primitive) {
+        used[action_name(info)].insert(t.args);
       }
     }
     for (const Method & method : p_.methods) {
@@ -943,7 +955,9 @@ private:
       };
     for (uint32_t t = 0; t < m_.tasks.size(); ++t) {
       const hddl::TaskInfo & info = m_.tasks[TaskId(t)];
-      task_schema_.push_back(info.primitive && !info.durative ? schema(info.action) : kNone);
+      const auto it = info.primitive ? schema_by_name.find(action_name(info)) :
+        schema_by_name.end();
+      task_schema_.push_back(it == schema_by_name.end() ? kNone : it->second);
     }
     for (const hddl::MethodInfo & method : m_.methods) {
       precondition_schema_.push_back(method.precondition_action < 0 ? kNone :

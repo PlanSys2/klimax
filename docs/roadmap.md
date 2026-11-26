@@ -12,8 +12,8 @@ in [baseline.md](baseline.md).
 | H3 | done | Partial order: one linearization of each network, and a search that interleaves | Coverage at least that of the best planner of the baseline |
 | H3b | done | Python module and Unified Planning engine ([up-klimax](https://github.com/PlanSys2/up-klimax)) | Hierarchical problems solved from Unified Planning, with the plans verified |
 | H4 | done | Anytime search, optimal plans, finer heuristics | Best satisficing score; optimal coverage at least that of the baseline |
-| H5 | in progress | Numbers | More problems of the numeric HTN benchmark than its authors' planner |
-| H6 | planned | Time: the whole of HDDL 2.1, with a reference benchmark | Solves the benchmark with validated plans |
+| H5 | done | Numbers | More problems of the numeric HTN benchmark than its authors' planner |
+| H6 | in progress | Time: the whole of HDDL 2.1, with a reference benchmark | Solves the benchmark with validated plans |
 | H7 | planned | Robustness, fuzzing, PlanSys2 plugin, version 1.0.0 | As Kairos |
 
 ## Where it stands
@@ -41,6 +41,10 @@ in [baseline.md](baseline.md).
 - **Object fluents** (H5): fluents whose value is an object, in conditions, effects and the
   goal. Kairos grounds them and Klimax turns them into atoms, so that the searches and their
   heuristics see them; the verifier follows them with the evaluator of Kairos' validator.
+- **Time** (H6, first step): durative actions, planned with each one as a single step, as
+  Kairos does with temporally simple problems, and the plan timed with one action after another.
+  Kairos' validator checks every plan as a temporal plan of PDDL 2.1. The verifier reads plans
+  with times and durations.
 - **Anytime and optimal** (H4): after the first plan Klimax looks for better ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans
@@ -63,8 +67,14 @@ in [baseline.md](baseline.md).
 
 ## Known limits
 
-- Durative actions and temporal constraints are read by neither the planner nor the verifier
-  yet: they are reported as not supported, never accepted.
+- Of time: no two actions of a plan overlap yet. A problem that needs them to (an action that
+  needs what another gives only while it runs) is reported as not supported, and so is one with
+  no plan of that kind, never as unsolvable. Timed initial literals, durative methods, the
+  duration and the time points of tasks in constraints, and `?duration` inside conditions or
+  effects are not read yet either: not supported, never accepted. The verifier does not follow
+  plans whose actions overlap.
+- Where a resource decides the plan the heuristics do not see it: the seven largest problems
+  of Transport_fuel (58 to 82 places) run out of time, and take 0.15 s without the fuel.
 - Of object fluents: two that must differ, or that must be equal in the goal, are not planned
   with (reported as not supported), and a function term cannot be the argument of a task.
 - The first plan is found without looking at the metric: only the anytime search uses it. With

@@ -27,11 +27,12 @@ International Planning Competition (IPC), and gives back the sequence of actions
 its decomposition: which method was applied to each task and what each of its subtasks became.
 It is developed within the [PlanSys2](https://github.com/PlanSys2) organization, next to
 [Kairos](https://github.com/PlanSys2/kairos), whose modules it is built on (parser, grounder,
-Datalog engine). It does not depend on ROS.
+Datalog engine, the evaluator and the validator of plans). It does not depend on ROS.
 
 > **Status**: in development, no release yet. Klimax plans HDDL 1.0 problems (total and partial
-> order) and those with the numeric fluents of HDDL 2.1. Time, the other extension of HDDL 2.1,
-> is the next phase of the [roadmap](docs/roadmap.md).
+> order) and those with the numeric fluents of HDDL 2.1. Of time, the other extension of
+> HDDL 2.1, it plans with durative actions one after another; the rest is the current phase of
+> the [roadmap](docs/roadmap.md).
 
 **How it compares**: on the benchmark of the HTN tracks of IPC 2023, with every plan checked by
 the IPC verifier and the same limits for all, Klimax solves 626 of the 761 total-order problems

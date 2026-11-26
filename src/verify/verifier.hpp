@@ -28,6 +28,13 @@
 namespace klimax::verifier
 {
 
+/// @brief When an action of a plan starts and what it lasts.
+struct Timed
+{
+  double time = 0.0;
+  double duration = 0.0;
+};
+
 struct Outcome
 {
   bool valid = false;
@@ -35,6 +42,9 @@ struct Outcome
   // Valid, and the problem has a metric that does not read time: its value at the end of the
   // plan (none if it reads a fluent with no value)
   std::optional<double> metric;
+  // Valid, with durative actions: when each action of the plan starts and what it lasts, in
+  // plan order. Those the plan gives, or one after another if it gives none.
+  std::vector<Timed> times;
 };
 
 /// @brief A step of a verified plan: an action, or a task with the method that decomposes it.

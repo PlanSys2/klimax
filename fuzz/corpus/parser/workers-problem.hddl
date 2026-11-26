@@ -1,0 +1,4 @@
+(define (problem two) (:domain workers) (:objects ann bob - worker)
+ (:htn :subtasks (and (job ann) (job bob)))
+ (:init (idle ann) (idle bob))
+ (:goal (and (done ann) (done bob))))

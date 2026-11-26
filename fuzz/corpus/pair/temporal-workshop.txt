@@ -1,0 +1,66 @@
+(define (domain workshop-1-domain)
+ (:requirements :strips :typing :durative-actions :hierarchy :method-preconditions)
+ (:types machine piece)
+ (:predicates 
+             (free ?m - machine)
+             (first ?p - piece ?m - machine)
+             (second ?p - piece ?m - machine)
+             (done ?p - piece ?m - machine)
+ )
+ (:functions 
+             (time_ ?p - piece ?m - machine)
+ )
+ (:task make
+  :parameters ( ?p - piece))
+ (:method m-make
+  :parameters ( ?p - piece ?a - machine ?b - machine)
+  :task (make ?p)
+  :precondition (and (first ?p ?a) (second ?p ?b))
+  :ordered-subtasks (and
+    (_t221 (process ?p ?a))
+    (_t222 (process ?p ?b))))
+ (:durative-action process
+  :parameters ( ?p - piece ?m - machine)
+  :duration (= ?duration (time_ ?p ?m))
+  :condition (and 
+                 (at start (free ?m))
+             )
+  :effect (and
+              (at start (not (free ?m)))
+              (at end (free ?m))
+              (at end (done ?p ?m))
+          )
+ )
+)
+
+;;;;
+(define (problem workshop-1-problem)
+ (:domain workshop-1-domain)
+ (:objects
+   machine0 machine1 - machine
+   piece0 piece1 - piece
+ )
+ (:htn
+  :subtasks (and
+    (_t223 (make piece0))
+    (_t224 (make piece1)))
+  :ordering (and
+    ))
+ (:init
+              (first piece0 machine0)
+              (second piece0 machine1)
+              (= (time_ piece0 machine0) 5)
+              (= (time_ piece0 machine1) 2)
+              (first piece1 machine1)
+              (second piece1 machine0)
+              (= (time_ piece1 machine1) 8)
+              (= (time_ piece1 machine0) 7)
+              (free machine0)
+              (free machine1)
+ )
+ (:goal (and 
+           (done piece0 machine1)
+           (done piece1 machine0)
+        )
+ )
+)

@@ -16,12 +16,23 @@ jobs:
           - name: gcc-release
             os: ubuntu-24.04
             cxx: g++
+            build_type: Release
+            sanitize: ""
           - name: clang-release
             os: ubuntu-24.04
             cxx: clang++
+            build_type: Release
+            sanitize: ""
+          - name: gcc-asan-ubsan
+            os: ubuntu-24.04
+            cxx: g++
+            build_type: Debug
+            sanitize: "address;undefined"
           - name: gcc-arm64
             os: ubuntu-24.04-arm
             cxx: g++
+            build_type: Release
+            sanitize: ""
     steps:
       - uses: actions/checkout@v5
 
@@ -50,7 +61,8 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
-          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          "-DKLIMAX_SANITIZE=${{ matrix.sanitize }}"
           -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
           -DKLIMAX_WARNINGS_AS_ERRORS=ON
           -DKLIMAX_BUILD_PYTHON=ON
@@ -59,5 +71,56 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # A failed test runs once more: a load spike of the runner should not fail the CI, a real
+      # regression fails both times
       - name: Test
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: ctest --test-dir build --output-on-failure --repeat until-pass:2
+
+  fuzz:
+    name: libFuzzer (2 min per target)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang
+
+      - name: Build and install Kairos
+        run: |
+          git clone --depth 1 https://github.com/PlanSys2/kairos.git "$RUNNER_TEMP/kairos"
+          cmake -S "$RUNNER_TEMP/kairos" -B "$RUNNER_TEMP/kairos-build" -G Ninja \
+            -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release \
+            -DKAIROS_INSTALL_CORE=ON -DKAIROS_BUILD_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/prefix"
+          cmake --build "$RUNNER_TEMP/kairos-build"
+          cmake --install "$RUNNER_TEMP/kairos-build"
+
+      - name: Build the fuzzers
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DKLIMAX_BUILD_TESTS=OFF -DKLIMAX_BUILD_FUZZERS=ON \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
+          cmake --build build --target hddl_parser_fuzzer check_fuzzer verify_fuzzer solve_fuzzer
+
+      # Each target with its seeds; what it finds is kept as an artifact
+      - name: Fuzz
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          mkdir -p found
+          for t in hddl_parser:parser check:pair verify:plan solve:pair; do
+            n=${t%%:*}; c=${t##*:}; mkdir -p "work_$n"
+            ./build/fuzz/${n}_fuzzer -max_total_time=120 -max_len=32768 -timeout=20 \
+              -rss_limit_mb=4096 -artifact_prefix=found/ "work_$n" "fuzz/corpus/$c"
+          done
+
+      - name: Keep what was found
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-found
+          path: found/

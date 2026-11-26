@@ -72,6 +72,23 @@ TEST(TemporalTest, OneActionAfterAnother)
 
 const char * kTree = "root 4 5\n4 make cup -> make-cold 1 2\n5 make bowl -> make-hot 3\n<==\n";
 
+TEST(TemporalTest, AnActionThatLastsNothingEndsAfterItStarts)
+{
+  // Found by fuzzing: its end, at the time of its start, was taken before it
+  const std::string instant = "(= (time-of cup) 0)";
+  std::string zero = problem();
+  zero.replace(zero.find("(= (time-of cup) 3)"), 19, instant);
+  SolveResult r = solve(kDomain, zero);
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  EXPECT_NE(r.plan.find("(bake cup) [0.000]"), std::string::npos) << r.plan;
+  VerifyResult v = verify(kDomain, zero, r.plan);
+  EXPECT_TRUE(v.valid) << v.reason << "\n" << r.plan;
+  const std::string plan = std::string("==>\n1 0: (fire) [8]\n2 8.001: (bake cup) [0]\n") +
+    "3 8.002: (bake bowl) [4.5]\n" + kTree;
+  v = verify(kDomain, zero, plan);
+  EXPECT_TRUE(v.valid) << v.reason;
+}
+
 TEST(TemporalTest, TheVerifierTimesAPlanThatGivesNoTimes)
 {
   const std::string plan = std::string("==>\n1 fire\n2 bake cup\n3 bake bowl\n") + kTree;

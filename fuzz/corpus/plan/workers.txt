@@ -1,0 +1,23 @@
+(define (domain workers) (:requirements :typing :hierarchy :durative-actions)
+ (:types worker)
+ (:predicates (idle ?w - worker) (done ?w - worker))
+ (:task job :parameters (?w - worker))
+ (:method m :parameters (?w - worker) :task (job ?w) :subtasks (and (work ?w)))
+ (:durative-action work :parameters (?w - worker) :duration (= ?duration 5)
+  :condition (and (at start (idle ?w)))
+  :effect (and (at start (not (idle ?w))) (at end (idle ?w)) (at end (done ?w)))))
+
+;;;;
+(define (problem two) (:domain workers) (:objects ann bob - worker)
+ (:htn :subtasks (and (job ann) (job bob)))
+ (:init (idle ann) (idle bob))
+ (:goal (and (done ann) (done bob))))
+
+;;;;
+==>
+3 0.000: (work ann) [5.000]
+6 0.000: (work bob) [5.000]
+root 1 2
+1 job ann -> m 3
+2 job bob -> m 6
+<==

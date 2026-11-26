@@ -1,0 +1,8 @@
+(define (domain workers) (:requirements :typing :hierarchy :durative-actions)
+ (:types worker)
+ (:predicates (idle ?w - worker) (done ?w - worker))
+ (:task job :parameters (?w - worker))
+ (:method m :parameters (?w - worker) :task (job ?w) :subtasks (and (work ?w)))
+ (:durative-action work :parameters (?w - worker) :duration (= ?duration 5)
+  :condition (and (at start (idle ?w)))
+  :effect (and (at start (not (idle ?w))) (at end (idle ?w)) (at end (done ?w)))))

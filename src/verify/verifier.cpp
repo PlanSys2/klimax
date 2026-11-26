@@ -1774,9 +1774,14 @@ private:
     struct Happening
     {
       double time;
-      int kind;  // 0: an end, 1: the literals of the time, 2: a start
+      // 0: an end, 1: the literals of the time, 2: a start, 3: the end of what lasts nothing
+      // (after its own start)
+      int kind;
       uint32_t position;
     };
+    // Times that differ by less than a millionth are the same time (a start written as the
+    // sum of another start and a duration)
+    auto instant_of = [](double t) {return std::llround(t * 1e6);};
     std::vector<Happening> all;
     for (uint32_t index : sequence_) {
       const Node & n = nodes_[index];
@@ -1784,16 +1789,15 @@ private:
       all.push_back(Happening{when.time, 2, n.position});
       if (m_.tasks[n.task].durative) {
         temporal_ = true;
-        all.push_back(Happening{when.time + when.duration, 0, n.position});
+        const double end = when.time + when.duration;
+        all.push_back(Happening{end, instant_of(end) == instant_of(when.time) ? 3 : 0,
+            n.position});
       }
     }
     for (const Literal & l : literals_) {
       temporal_ = true;
       all.push_back(Happening{l.time, 1, 0});
     }
-    // Times that differ by less than a millionth are the same time (a start written as the
-    // sum of another start and a duration)
-    auto instant_of = [](double t) {return std::llround(t * 1e6);};
     std::stable_sort(all.begin(), all.end(), [&](const Happening & a, const Happening & b) {
         return instant_of(a.time) != instant_of(b.time) ? a.time < b.time : a.kind < b.kind;
       });

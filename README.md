@@ -132,6 +132,11 @@ Add `-DKLIMAX_BUILD_PYTHON=ON` for the Python module (needs
 [nanobind](https://github.com/wjakob/nanobind)). In a colcon workspace:
 `colcon build --cmake-args -DKAIROS_INSTALL_CORE=ON`.
 
+For development: `-DKLIMAX_SANITIZE="address;undefined"` builds with AddressSanitizer and
+UndefinedBehaviorSanitizer. The fuzz targets in [fuzz/](fuzz/) (the HDDL parser, `check`,
+`verify`, and `solve`, whose plans must all verify) replay their seeds as tests. With Clang,
+`-DKLIMAX_BUILD_FUZZERS=ON` builds them as libFuzzer binaries.
+
 ## Documents
 
 - [docs/semantics.md](docs/semantics.md): the language Klimax accepts and what a solution is.

@@ -37,6 +37,8 @@ option(KLIMAX_BUILD_TESTS "Build the tests" ${_klimax_tests_default})
 option(KLIMAX_BUILD_CLI "Build the klimax executable" ON)
 option(KLIMAX_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(KLIMAX_BUILD_PYTHON "Build the Python module (needs nanobind)" OFF)
+option(KLIMAX_BUILD_FUZZERS "Build the libFuzzer targets (needs Clang)" OFF)
+set(KLIMAX_SANITIZE "" CACHE STRING "Sanitizers: empty or 'address;undefined'")
 
 include(GNUInstallDirs)
 
@@ -56,6 +58,16 @@ function(klimax_configure_target target)
       target_compile_options(${target} PRIVATE -Werror)
     endif()
   endif()
+  if(KLIMAX_SANITIZE)
+    string(REPLACE ";" "," _sanitizers "${KLIMAX_SANITIZE}")
+    target_compile_options(${target} PRIVATE -fsanitize=${_sanitizers} -fno-omit-frame-pointer)
+    target_link_options(${target} PRIVATE -fsanitize=${_sanitizers})
+  endif()
+  # Fuzzing: the library is instrumented too, for libFuzzer to see what an input reaches
+  if(KLIMAX_BUILD_FUZZERS)
+    target_compile_options(${target} PRIVATE -fsanitize=fuzzer-no-link,address,undefined -g)
+    target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+  endif()
 endfunction()
 
 add_subdirectory(src)
@@ -67,6 +79,10 @@ endif()
 
 if(KLIMAX_BUILD_PYTHON)
   add_subdirectory(python)
+endif()
+
+if(KLIMAX_BUILD_TESTS OR KLIMAX_BUILD_FUZZERS)
+  add_subdirectory(fuzz)
 endif()
 
 include(CMakePackageConfigHelpers)

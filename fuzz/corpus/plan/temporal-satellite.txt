@@ -1,0 +1,97 @@
+(define (domain satellite-1-domain)
+ (:requirements :strips :typing :negative-preconditions :durative-actions :timed-initial-literals :hierarchy :method-preconditions)
+ (:types site)
+ (:predicates 
+             (pointing ?s - site)
+             (visible ?s - site)
+             (taken ?s - site)
+ )
+ (:functions 
+             (turn-time ?a - site ?b - site)
+ )
+ (:task observe
+  :parameters ( ?s - site))
+ (:method m-here
+  :parameters ( ?s - site)
+  :task (observe ?s)
+  :precondition (and (pointing ?s))
+  :ordered-subtasks (and
+    (_t126 (take-image ?s))))
+ (:method m-turn
+  :parameters ( ?s - site ?a - site)
+  :task (observe ?s)
+  :precondition (and (pointing ?a) (not (pointing ?s)))
+  :ordered-subtasks (and
+    (_t127 (turn ?a ?s))
+    (_t128 (take-image ?s))))
+ (:durative-action turn
+  :parameters ( ?a - site ?b - site)
+  :duration (= ?duration (turn-time ?a ?b))
+  :condition (and 
+                 (at start (pointing ?a))
+             )
+  :effect (and
+              (at start (not (pointing ?a)))
+              (at end (pointing ?b))
+          )
+ )
+ (:durative-action take-image
+  :parameters ( ?s - site)
+  :duration (= ?duration 2)
+  :condition (and 
+                 (at start (pointing ?s))
+                 (at start (visible ?s))
+                 (over all (pointing ?s))
+                 (over all (visible ?s))
+             )
+  :effect (and
+              (at end (taken ?s))
+          )
+ )
+)
+
+;;;;
+(define (problem satellite-1-problem)
+ (:domain satellite-1-domain)
+ (:objects
+   site0 site1 site2 - site
+ )
+ (:htn
+  :subtasks (and
+    (_t129 (observe site1))
+    (_t130 (observe site2)))
+  :ordering (and
+    ))
+ (:init
+              (= (turn-time site0 site1) 9)
+              (= (turn-time site0 site2) 23)
+              (= (turn-time site1 site0) 30)
+              (= (turn-time site1 site2) 29)
+              (= (turn-time site2 site0) 7)
+              (= (turn-time site2 site1) 13)
+              (pointing site0)
+              (= (turn-time site0 site0) 10)
+              (= (turn-time site1 site1) 10)
+              (= (turn-time site2 site2) 10)
+              (at 8.0 (visible site1))
+              (at 188.0 (not (visible site1)))
+              (at 32.0 (visible site2))
+              (at 212.0 (not (visible site2)))
+ )
+ (:goal (and 
+           (taken site1)
+           (taken site2)
+        )
+ )
+)
+
+;;;;
+==>
+3 0.000: (turn site0 site1) [9.000]
+4 9.001: (take-image site1) [2.000]
+11 11.001: (turn site1 site2) [29.000]
+12 40.002: (take-image site2) [2.000]
+root 1 2
+1 observe site1 -> m-turn 3 4
+2 observe site2 -> m-turn 11 12
+<==

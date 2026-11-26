@@ -65,7 +65,7 @@ jobs:
           "-DKLIMAX_SANITIZE=${{ matrix.sanitize }}"
           -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
           -DKLIMAX_WARNINGS_AS_ERRORS=ON
-          -DKLIMAX_BUILD_PYTHON=ON
+          -DKLIMAX_BUILD_PYTHON=${{ matrix.sanitize == '' && 'ON' || 'OFF' }}
           -DPython_EXECUTABLE="$RUNNER_TEMP/venv/bin/python"
 
       - name: Build

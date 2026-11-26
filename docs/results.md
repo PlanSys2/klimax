@@ -161,6 +161,39 @@ its solver, since it is run from Python (below), which takes half a second more.
   methods of that domain leaves its subtasks without an order: by the semantics of HDDL it
   is a partially ordered domain.
 
+## Time
+
+A first measure, on thirty problems generated for it (three families of ten, of growing size)
+while the reference benchmark of the [roadmap](roadmap.md) is not published: its generators
+will be. Each family has durative actions and tasks that the initial network does not order:
+
+- **Transport**: trucks deliver packages over roads of some length.
+- **Satellite**: a satellite takes images of sites that are visible only for a while (timed
+  initial literals).
+- **Workshop**: pieces go through two machines in order; a machine does one piece at a time.
+
+Both planners get the same problem through Unified Planning, at 30 s per problem, one core and
+8 GB, with every plan checked by Klimax's verifier and, for Klimax, by Kairos' validator:
+
+| Family | Klimax | Aries |
+|---|---|---|
+| Transport | 10 | 0 |
+| Satellite | 10 | 10 |
+| Workshop | 10 | 10 |
+| **Total** | **30 of 30** | **20 of 30** |
+
+- Aries is `up-aries` 0.5.0. In Transport it runs out of time in six problems and gives a plan
+  in the four smallest, which the verifier rejects: each `drive` lasts 0.1 more than the
+  problem says (the length of its road). They are counted as not solved; with durations taken
+  loosely they would be four more.
+- In the twenty that both solve the plans of Klimax end at 2942 in all and those of Aries at
+  3040. Klimax's is the shorter in nine and Aries' in five.
+- Both are run from Python, which takes about 0.65 s before the planner starts: within 1 s
+  Klimax solves 26 and Aries 2.
+- Klimax finds a plan with one durative action after another and then lets Kairos' scheduler
+  overlap what the hierarchy and the actions allow. In Satellite, where the scheduler does not
+  read the timed initial literals, the plans stay with one action after another.
+
 ## Notes
 
 - The Klimax rows come from one run at 30 s per track, as those of the baseline do, on the same

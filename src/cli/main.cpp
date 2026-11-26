@@ -272,10 +272,12 @@ void print_timeline(
     };
   size_t at_once = 0;
   for (const Row & r : rows) {
-    // The others that run while it does (two that only touch at an instant do not)
+    // The others that run while it does (two that only touch at an instant do not, even when
+    // the sums of the times round apart: 5.001 + 5 > 10.001)
+    constexpr double kTouch = 1e-6;
     size_t others = 0;
     for (const Row & o : rows) {
-      others += &o != &r && o.from < r.to && r.from < o.to;
+      others += &o != &r && o.from < r.to - kTouch && r.from < o.to - kTouch;
     }
     at_once = std::max(at_once, others);
     std::string number = std::to_string(r.place);

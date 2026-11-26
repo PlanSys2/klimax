@@ -157,6 +157,8 @@ void fill(Out & result, verifier::Tree & tree, const Spelling & spelling)
     out.end = step.end;
     out.order = std::move(step.order);
     out.precondition = std::move(step.precondition);
+    out.applied_after = step.applied_after;
+    out.applied_at = step.applied_at;
     result.steps_of_plan.push_back(std::move(out));
   }
   std::for_each(tree.root_labels.begin(), tree.root_labels.end(), name);

@@ -84,6 +84,8 @@ NB_MODULE(_klimax, m)
   .def_ro("labels", &klimax::PlanStep::labels)
   .def_ro("order", &klimax::PlanStep::order)
   .def_ro("precondition", &klimax::PlanStep::precondition)
+  .def_ro("applied_after", &klimax::PlanStep::applied_after)
+  .def_ro("applied_at", &klimax::PlanStep::applied_at)
   .def_ro("start", &klimax::PlanStep::start)
   .def_ro("end", &klimax::PlanStep::end);
 

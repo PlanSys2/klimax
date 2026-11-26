@@ -445,6 +445,14 @@ TEST(TemporalTest, TheDecompositionSaysOrdersAndPreconditions)
   r = solve(kJobs, jobs("(< a b)"), options);
   ASSERT_EQ(r.status, Status::Solved) << r.message;
   EXPECT_EQ(r.root_order.size(), 1u);
+  // When each method was applied: the second job's once the first has ended
+  for (const PlanStep & s : r.steps_of_plan) {
+    if (!s.primitive && s.args == std::vector<std::string>{"bob"}) {
+      EXPECT_EQ(s.applied_after, 1u);
+      ASSERT_TRUE(s.applied_at.has_value());
+      EXPECT_GE(*s.applied_at, 5.0);
+    }
+  }
 }
 
 }  // namespace

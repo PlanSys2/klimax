@@ -112,6 +112,10 @@ struct PlanStep
   // the values of its parameters, "" if it has none
   std::vector<std::pair<uint32_t, uint32_t>> order;
   std::string precondition;
+  // When its method was applied, its precondition holding then: once this many actions of the
+  // plan had ended and, in a plan with times, at this time. An executor checks it there
+  size_t applied_after = 0;
+  std::optional<double> applied_at;
   // In a plan with durative actions or timed initial literals: when it starts and when it
   // ends. A task, when the first of its actions starts and the last one ends
   std::optional<double> start;

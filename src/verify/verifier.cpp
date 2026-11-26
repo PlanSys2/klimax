@@ -185,6 +185,7 @@ struct Node
   double from = 0.0;
   double to = 0.0;
   double tested = 0.0;          // abstract: when its method was applied
+  size_t tested_after = 0;      // abstract: and how many actions had ended then
   // abstract: of the functions in its duration constraints, read when its method was applied
   std::vector<std::pair<ast::ExprId, double>> values;
   bool began = false;           // some action below it has started
@@ -307,6 +308,12 @@ public:
       if (temporal_) {
         step.start = n.from;
         step.end = n.to;
+      }
+      if (!n.primitive) {
+        step.applied_after = n.tested_after;
+        if (temporal_) {
+          step.applied_at = n.tested;
+        }
       }
       if (!n.primitive) {
         const hddl::MethodInfo & method = m_.methods[n.method];
@@ -974,6 +981,7 @@ private:
       apply(a.effect, val::Evaluator::Ctx{state_, running.before ? &*running.before : nullptr,
           val::Phase::End, running.duration}, running.env, n);
     }
+    ++ended_;  // counted once it has, a try that fails does not
   }
 
   // What a durative action lasts when the plan does not say: what its duration is equal to,
@@ -1170,6 +1178,7 @@ private:
   void applied(Node & n)
   {
     n.tested = now_;
+    n.tested_after = ended_;
     const hddl::MethodInfo & method = m_.methods[n.method];
     if (method.durations.empty()) {
       return;
@@ -1600,6 +1609,7 @@ private:
       invalid("step " + show(n) + " is an action without duration");
     }
     when.duration = 0.0;
+    ++ended_;
   }
 
   // A plan without times: each step when the one before has ended
@@ -1943,6 +1953,7 @@ private:
   std::vector<bool> durations_given_;  // by the plan
   std::string times_broken_;
   double now_ = 0.0;                // the time of what is taking place
+  size_t ended_ = 0;                // actions that have ended
   std::vector<uint32_t> lasting_;   // nodes of durative methods with a condition, under way
   std::vector<Scope> scopes_;       // networks with constraints on states, under way
   std::vector<Literal> literals_;  // the timed initial literals, in the order of time

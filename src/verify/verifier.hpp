@@ -71,6 +71,10 @@ struct Step
   // values of its parameters, "" if it has none
   std::vector<std::pair<uint32_t, uint32_t>> order;
   std::string precondition;
+  // When its method was applied (its precondition holding then): after how many actions of the
+  // plan had ended and, in a plan with times, at what time
+  size_t applied_after = 0;
+  std::optional<double> applied_at;
   // In a plan with times: when it starts and when it ends. A task, when the first of its
   // actions starts and the last one ends
   std::optional<double> start;

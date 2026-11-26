@@ -65,6 +65,16 @@ if(KLIMAX_BUILD_CLI)
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl)
   set_tests_properties(cli_check PROPERTIES
     PASS_REGULAR_EXPRESSION "actions 6, tasks 3, methods 6, objects 7, initial tasks 2, total order")
+  add_test(NAME cli_tree COMMAND klimax_cli
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl --tree)
+  set_tests_properties(cli_tree PROPERTIES
+    PASS_REGULAR_EXPRESSION "deliver juice bedroom  ← m-deliver\n├── go-to tiago kitchen")
+  add_test(NAME cli_tree_of_a_plan COMMAND klimax_cli --tree
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.hddl
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p2-partial-order.plan)
+  set_tests_properties(cli_tree_of_a_plan PROPERTIES PASS_REGULAR_EXPRESSION "└── +[0-9]+  ")
   add_test(NAME cli_check_missing_file COMMAND klimax_cli --check nowhere.hddl nowhere.hddl)
   set_tests_properties(cli_check_missing_file PROPERTIES WILL_FAIL ON)
 endif()

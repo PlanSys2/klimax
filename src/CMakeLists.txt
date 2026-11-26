@@ -20,6 +20,7 @@ set(KLIMAX_GENERATED_INCLUDE_DIR ${PROJECT_BINARY_DIR}/include)
 # The modules, compiled once: libklimax and the unit tests (which reach internal symbols) share them
 add_library(klimax_objects OBJECT
   check.cpp
+  schedule.cpp
   hddl/model.cpp
   hddl/parser.cpp
   hddl/split.cpp

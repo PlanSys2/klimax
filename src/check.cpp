@@ -34,6 +34,7 @@
 #include "hddl/parser.hpp"
 #include "kairos/diagnostics.hpp"
 #include "pddl/lexer.hpp"
+#include "schedule.hpp"
 #include "search/lifted.hpp"
 #include "search/sat.hpp"
 #include "search/total_order.hpp"
@@ -575,8 +576,10 @@ SolveResult solve(
           (model.value().problem.metric && !found.cost))
         {
           verifier::Tree tree;
+          verifier::Order order;
           const verifier::Outcome checked = verifier::verify(
-            model.value(), found.plan, options.decomposition ? &tree : nullptr);
+            model.value(), found.plan, options.decomposition ? &tree : nullptr,
+            temporal ? &order : nullptr);
           if (!checked.valid && temporal) {
             // Found taking each durative action as one step: where that is not enough (an
             // action needs what another gives only while it runs) the plan is not one
@@ -595,8 +598,23 @@ SolveResult solve(
             break;
           }
           if (!checked.times.empty()) {
-            result.plan = with_times(result.plan, checked.times);
-            result.makespan = checked.times.back().time + checked.times.back().duration;
+            // One action after another is a plan; with the actions as early as the hierarchy
+            // and what they read and write allow, a shorter one, if the verifier takes it
+            std::vector<verifier::Timed> times = checked.times;
+            if (order.complete) {
+              const std::vector<verifier::Timed> earlier =
+                schedule(model.value(), order.actions, order.before);
+              if (!earlier.empty() &&
+                verifier::verify(model.value(), with_times(found.plan, earlier)).valid)
+              {
+                times = earlier;
+              }
+            }
+            result.plan = with_times(result.plan, times);
+            result.makespan = 0.0;
+            for (const verifier::Timed & t : times) {
+              result.makespan = std::max(*result.makespan, t.time + t.duration);
+            }
           }
           if (checked.metric && found.cost && std::abs(*checked.metric - *found.cost) >
             1e-6 * std::max(1.0, std::abs(*checked.metric)))

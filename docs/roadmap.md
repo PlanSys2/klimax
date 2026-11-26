@@ -41,10 +41,12 @@ in [baseline.md](baseline.md).
 - **Object fluents** (H5): fluents whose value is an object, in conditions, effects and the
   goal. Kairos grounds them and Klimax turns them into atoms, so that the searches and their
   heuristics see them; the verifier follows them with the evaluator of Kairos' validator.
-- **Time** (H6, first step): durative actions, planned with each one as a single step, as
-  Kairos does with temporally simple problems, and the plan timed with one action after another.
-  Kairos' validator checks every plan as a temporal plan of PDDL 2.1. The verifier reads plans
-  with times and durations.
+- **Time** (H6, first steps): durative actions, planned with each one as a single step, as
+  Kairos does with temporally simple problems. The plan is then timed by Kairos' scheduler:
+  each action as early as what it reads and writes and the orderings of the hierarchy allow,
+  so actions that neither orders run at once. Kairos' validator checks every plan as a temporal
+  plan of PDDL 2.1. The verifier reads plans with times and durations, with actions that
+  overlap.
 - **Anytime and optimal** (H4): after the first plan Klimax looks for better ones and proves
   when none exists, with total and with partial order.
 - **Unified Planning** (H3b): a planner (oneshot and anytime), a validator of hierarchical plans
@@ -67,9 +69,10 @@ in [baseline.md](baseline.md).
 
 ## Known limits
 
-- Of time: no two actions of a plan overlap yet. A problem that needs them to (an action that
-  needs what another gives only while it runs) is reported as not supported, and so is one with
-  no plan of that kind, never as unsolvable. Timed initial literals, durative methods, the
+- Of time: plans are found with one durative action after another, and only then made
+  shorter. A problem that needs actions to overlap (one that needs what another gives only
+  while it runs) is reported as not supported, and so is one with no plan of that kind, never
+  as unsolvable. Timed initial literals, durative methods, the
   duration and the time points of tasks in constraints, and `?duration` inside conditions or
   effects are not read yet either: not supported, never accepted. The verifier does follow
   plans whose actions overlap.

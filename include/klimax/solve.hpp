@@ -81,7 +81,8 @@ struct SolveResult
   // time)
   std::optional<double> cost;
   // With durative actions: when the plan ends. Its actions then have a time and a duration,
-  // "id time: (action args) [duration]", one after another
+  // "id time: (action args) [duration]", each as early as what it reads and writes and the
+  // orderings of the hierarchy allow
   std::optional<double> makespan;
   double ground_ms = 0.0;
   double search_ms = 0.0;

@@ -143,5 +143,35 @@ TEST(TemporalTest, TheVerifierFollowsActionsThatOverlap)
   EXPECT_NE(v.reason.find("too early"), std::string::npos) << v.reason;
 }
 
+TEST(TemporalTest, ActionsOverlapWhereTheHierarchyAllows)
+{
+  // Two workers, a job each: at the same time if the task network does not order them
+  const char * domain =
+    "(define (domain d) (:requirements :typing :hierarchy :durative-actions)\n"
+    " (:types worker)\n"
+    " (:predicates (idle ?w - worker) (done ?w - worker))\n"
+    " (:task job :parameters (?w - worker))\n"
+    " (:method m :parameters (?w - worker) :task (job ?w) :subtasks (and (work ?w)))\n"
+    " (:durative-action work :parameters (?w - worker) :duration (= ?duration 5)\n"
+    "  :condition (and (at start (idle ?w)))\n"
+    "  :effect (and (at start (not (idle ?w))) (at end (idle ?w)) (at end (done ?w)))))";
+  auto problem = [](const std::string & subtasks) {
+      return "(define (problem p) (:domain d) (:objects ann bob - worker)\n"
+             "(:htn " + subtasks + " (and (job ann) (job bob))) (:init (idle ann) (idle bob))\n"
+             "(:goal (and (done ann) (done bob))))";
+    };
+  SolveResult r = solve(domain, problem(":subtasks"));
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  ASSERT_TRUE(r.makespan.has_value());
+  EXPECT_NEAR(*r.makespan, 5.0, 1e-9) << r.plan;
+  EXPECT_TRUE(verify(domain, problem(":subtasks"), r.plan).valid);
+  // The same plan is not one of the network that orders them
+  EXPECT_FALSE(verify(domain, problem(":ordered-subtasks"), r.plan).valid);
+  r = solve(domain, problem(":ordered-subtasks"));
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  ASSERT_TRUE(r.makespan.has_value());
+  EXPECT_NEAR(*r.makespan, 10.0, 1e-9) << r.plan;
+}
+
 }  // namespace
 }  // namespace klimax

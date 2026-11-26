@@ -228,6 +228,48 @@ public:
   // The plan as its decomposition, once run() has accepted it
   std::optional<double> metric() const {return metric_;}
 
+  void order(Order & out) const
+  {
+    for (uint32_t index : sequence_) {
+      out.actions.push_back(Order::Action{nodes_[index].task, nodes_[index].args});
+    }
+    // The actions below each node, by position
+    std::vector<std::vector<uint32_t>> leaves(nodes_.size());
+    for (size_t k = order_.size(); k-- > 0; ) {
+      const Node & n = nodes_[order_[k]];
+      if (n.primitive) {
+        leaves[order_[k]].push_back(n.position);
+      }
+      if (n.parent != kNone) {
+        auto & up = leaves[n.parent];
+        up.insert(up.end(), leaves[order_[k]].begin(), leaves[order_[k]].end());
+      }
+    }
+    out.complete = true;
+    auto network = [&](const hddl::Network & net, const std::vector<uint32_t> & steps) {
+        for (auto [a, b] : net.order) {
+          for (uint32_t first : leaves[steps[a]]) {
+            for (uint32_t second : leaves[steps[b]]) {
+              if (out.before.size() >= out.limit) {
+                out.complete = false;
+                return;
+              }
+              out.before.emplace_back(first, second);
+            }
+          }
+        }
+      };
+    network(m_.initial, roots_);
+    for (const Node & n : nodes_) {
+      if (!n.primitive && out.complete) {
+        network(m_.methods[n.method].network, n.children);
+      }
+    }
+    if (!out.complete) {
+      out.before.clear();
+    }
+  }
+
   /// The time and the duration of every action, if some action is durative
   std::vector<Timed> times() const {return temporal_ ? times_ : std::vector<Timed>();}
 
@@ -1270,13 +1312,16 @@ private:
 
 }  // namespace
 
-Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree)
+Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree, Order * order)
 {
   try {
     Verifier verifier(model, plan);
     verifier.run();
     if (tree != nullptr) {
       *tree = verifier.tree();
+    }
+    if (order != nullptr) {
+      verifier.order(*order);
     }
     return Outcome{true, "", verifier.metric(), verifier.times()};
   } catch (const Invalid & e) {

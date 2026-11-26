@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "hddl/model.hpp"
@@ -70,6 +71,23 @@ struct Tree
   std::vector<std::string> root_labels;
 };
 
+/// @brief The actions of a plan and what the hierarchy says of their order.
+struct Order
+{
+  struct Action
+  {
+    hddl::TaskId task;
+    std::vector<uint32_t> args;  // objects
+  };
+  std::vector<Action> actions;  // in plan order
+  // Pairs of positions in `actions`: the first has ended when the second starts, because a
+  // task network orders the tasks they belong to. None if there would be more than `limit`
+  // (`complete` is then false).
+  std::vector<std::pair<uint32_t, uint32_t>> before;
+  size_t limit = 300000;
+  bool complete = false;
+};
+
 /**
  * @brief Checks that `plan` solves the problem of `model` (docs/semantics.md, section 3.1).
  *
@@ -87,8 +105,13 @@ struct Tree
  *
  * With `tree`, a valid plan is also given as its decomposition: which subtask of its method each
  * step is, and the values of the method's parameters (those with which its precondition held).
+ *
+ * With `order`, of a valid plan: its actions and the orderings between them that come from
+ * the hierarchy.
  */
-Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree = nullptr);
+Outcome verify(
+  const hddl::Model & model, std::string_view plan, Tree * tree = nullptr,
+  Order * order = nullptr);
 
 }  // namespace klimax::verifier
 

@@ -179,6 +179,14 @@ struct Node
   uint32_t start = 0;
   uint32_t test = kNone;
   uint32_t end = 0;
+  // Times (HDDL 2.1). A task starts when the first of its actions does and ends when the last
+  // one does; with none, when its method was applied
+  double from = 0.0;
+  double to = 0.0;
+  double tested = 0.0;          // abstract: when its method was applied
+  // abstract: of the functions in its duration constraints, read when its method was applied
+  std::vector<std::pair<ast::ExprId, double>> values;
+  bool began = false;           // some action below it has started
 };
 
 struct Event
@@ -227,6 +235,10 @@ public:
 
   // The plan as its decomposition, once run() has accepted it
   std::optional<double> metric() const {return metric_;}
+
+  /// What the times of the plan break of the constraints on times and durations, if that is
+  /// all that is wrong with it
+  const std::string & times_broken() const {return times_broken_;}
 
   void order(Order & out) const
   {
@@ -1085,10 +1097,212 @@ private:
       waiting.swap(waiting_);
       for (uint32_t e : waiting) {
         if (precondition_holds(nodes_[events_[e].node])) {
+          applied(nodes_[events_[e].node]);
           place(e);
           changed = true;
         } else {
           waiting_.push_back(e);
+        }
+      }
+    }
+    conditions();
+  }
+
+  // The values of the parameters of the method of a node, by name
+  val::Bindings parameters(const Node & n) const
+  {
+    val::Bindings env;
+    const hddl::MethodInfo & method = m_.methods[n.method];
+    for (size_t p = 0; p < method.params.size() && !n.bindings.empty(); ++p) {
+      if (const auto symbol = m_.pddl.symbols.find(method.params[p].name)) {
+        env.emplace_back(*symbol, n.bindings[n.held][p]);
+      }
+    }
+    return env;
+  }
+
+  // A method is applied now: the functions in its duration constraints are read in this state
+  void applied(Node & n)
+  {
+    n.tested = now_;
+    const hddl::MethodInfo & method = m_.methods[n.method];
+    if (method.durations.empty()) {
+      return;
+    }
+    val::Bindings env = parameters(n);
+    std::vector<ast::ExprId> pending;
+    for (const hddl::DurationConstraint & d : method.durations) {
+      pending.push_back(d.lhs);
+      pending.push_back(d.rhs);
+    }
+    while (!pending.empty()) {
+      const ast::ExprId id = pending.back();
+      pending.pop_back();
+      const ast::Expr & e = m_.pddl.nodes.exprs[id];
+      pending.insert(pending.end(), e.children.begin(), e.children.end());
+      const bool of_step = std::any_of(method.duration_of.begin(), method.duration_of.end(),
+          [&](const auto & d) {return d.first == id;});
+      if (e.kind != ast::ExprKind::Function || of_step) {
+        continue;
+      }
+      try {
+        n.values.emplace_back(
+          id, world_.domain_eval.number(id, val::Evaluator::Ctx{state_}, env));
+      } catch (const val::EvalError & error) {
+        invalid("step " + show(n) + ": a duration of method " + method.name +
+          " cannot be computed: " + error.message);
+      } catch (const val::Unsupported & u) {
+        invalid("unsupported: " + u.message);
+      }
+    }
+  }
+
+  // The value of an expression of a duration constraint, once the times are known
+  double duration_value(const Node & n, ast::ExprId id) const
+  {
+    const hddl::MethodInfo & method = m_.methods[n.method];
+    const ast::Expr & e = m_.pddl.nodes.exprs[id];
+    auto child = [&](size_t i) {return duration_value(n, e.children.at(i));};
+    switch (e.kind) {
+      case ast::ExprKind::Number:
+        return e.number;
+      case ast::ExprKind::Duration:
+        return n.to - n.from;
+      case ast::ExprKind::Function:
+        for (const auto & [expr, step] : method.duration_of) {
+          if (expr == id) {
+            return nodes_[n.children[step]].to - nodes_[n.children[step]].from;
+          }
+        }
+        for (const auto & [expr, value] : n.values) {
+          if (expr == id) {
+            return value;
+          }
+        }
+        return 0.0;
+      case ast::ExprKind::Add: {
+          double total = 0.0;
+          for (size_t i = 0; i < e.children.size(); ++i) {
+            total += child(i);
+          }
+          return total;
+        }
+      case ast::ExprKind::Mul: {
+          double total = 1.0;
+          for (size_t i = 0; i < e.children.size(); ++i) {
+            total *= child(i);
+          }
+          return total;
+        }
+      case ast::ExprKind::Sub:
+        return child(0) - child(1);
+      case ast::ExprKind::Div:
+        return child(0) / child(1);
+      default:
+        return -child(0);
+    }
+  }
+
+  // An action starts: so do the tasks above it that had not
+  void started(const Node & leaf)
+  {
+    for (uint32_t up = leaf.parent; up != kNone && !nodes_[up].began; up = nodes_[up].parent) {
+      nodes_[up].began = true;
+      if (m_.methods[nodes_[up].method].condition.valid()) {
+        lasting_.push_back(up);
+      }
+    }
+  }
+
+  // The conditions of the durative methods under way: over all while their task lasts, at end
+  // once its last action has ended
+  void conditions()
+  {
+    for (size_t i = 0; i < lasting_.size(); ) {
+      const Node & n = nodes_[lasting_[i]];
+      const hddl::MethodInfo & method = m_.methods[n.method];
+      const bool ended = events_[n.end].placed;
+      val::Bindings env = parameters(n);
+      const val::Evaluator::Ctx c{
+        state_, nullptr, ended ? val::Phase::End : val::Phase::Invariant};
+      bool ok = false;
+      try {
+        ok = world_.domain_eval.holds(method.condition, c, env);
+      } catch (const val::EvalError &) {
+        ok = false;
+      } catch (const val::Unsupported & u) {
+        invalid("unsupported: " + u.message);
+      }
+      if (!ok) {
+        invalid("step " + show(n) + ": the condition of method " + method.name +
+          (ended ? " at end" : " over all") + " does not hold");
+      }
+      if (ended) {
+        lasting_.erase(lasting_.begin() + static_cast<std::ptrdiff_t>(i));
+      } else {
+        ++i;
+      }
+    }
+  }
+
+  // When each task starts and ends, and what the networks and the methods say of those times
+  void check_times()
+  {
+    for (size_t k = order_.size(); k-- > 0; ) {
+      Node & n = nodes_[order_[k]];
+      if (n.primitive) {
+        n.from = times_[n.position].time;
+        n.to = n.from + times_[n.position].duration;
+        continue;
+      }
+      n.from = n.to = n.tested;
+      bool first = true;
+      for (uint32_t c : n.children) {
+        const Node & child = nodes_[c];
+        n.from = first ? child.from : std::min(n.from, child.from);
+        n.to = first ? child.to : std::max(n.to, child.to);
+        first = false;
+      }
+    }
+    constexpr double kSame = 1e-9;
+    auto network = [&](const hddl::Network & net, const std::vector<uint32_t> & steps,
+        const std::string & where) {
+        for (const hddl::TimeConstraint & t : net.times) {
+          const Node & a = nodes_[steps[t.a]];
+          const Node & b = nodes_[steps[t.b]];
+          const double left = t.a_end ? a.to : a.from;
+          const double right = t.b_end ? b.to : b.from;
+          const bool ok = t.op == ast::CompareOp::Lt ? left < right - kSame :
+            t.op == ast::CompareOp::Le ? left <= right + kSame : std::abs(left - right) <= kSame;
+          if (!ok) {
+            invalid("steps " + show(a) + " and " + show(b) + ": their times break an ordering "
+              "constraint of " + where);
+          }
+        }
+      };
+    network(m_.initial, roots_, "the initial task network");
+    // Durations are written with three decimals
+    constexpr double kDuration = 1e-3;
+    for (const Node & n : nodes_) {
+      if (n.primitive) {
+        continue;
+      }
+      const hddl::MethodInfo & method = m_.methods[n.method];
+      network(method.network, n.children, "method " + method.name);
+      for (const hddl::DurationConstraint & c : method.durations) {
+        const double left = duration_value(n, c.lhs);
+        const double right = duration_value(n, c.rhs);
+        bool ok = false;
+        switch (c.op) {
+          case ast::CompareOp::Eq: ok = std::abs(left - right) <= kDuration; break;
+          case ast::CompareOp::Lt: ok = left < right - kSame; break;
+          case ast::CompareOp::Le: ok = left <= right + kDuration; break;
+          case ast::CompareOp::Gt: ok = left > right + kSame; break;
+          default: ok = left >= right - kDuration; break;
+        }
+        if (!ok) {
+          invalid("step " + show(n) + ": its durations break a duration constraint of method " +
+            method.name);
         }
       }
     }
@@ -1130,6 +1344,8 @@ private:
       starts(n);
       Timed & when = times_[n.position];
       when.time = n.position == 0 ? 0.0 : clock + kEpsilon;
+      now_ = when.time;
+      started(n);
       if (m_.tasks[n.task].durative) {
         temporal_ = true;
         const ast::DurativeAction & a = m_.pddl.durative_actions[m_.tasks[n.task].action];
@@ -1137,6 +1353,7 @@ private:
         place(n.start);
         settle();
         check(a, n, running, val::Phase::Invariant, "over all");
+        now_ = when.time + when.duration;
         finish(a, n, running);
       } else {
         instant(n, when);
@@ -1223,6 +1440,7 @@ private:
       std::string why;
       for (size_t c = 0; c < candidates.size() && !done; ++c) {
         when.time = candidates[c];
+        now_ = when.time;
         if (literals_until(when.time - kEpsilon)) {
           settle();
         }
@@ -1260,6 +1478,8 @@ private:
         invalid(why);
       }
       clock = when.time + when.duration;
+      now_ = clock;
+      started(n);
       if (lasts) {
         place(n.start);
       }
@@ -1299,6 +1519,7 @@ private:
       });
     std::vector<Running> running(sequence_.size());
     for (const Happening & h : all) {
+      now_ = h.time;
       if (h.kind == 1) {
         if (literals_until(h.time)) {
           settle();
@@ -1309,9 +1530,11 @@ private:
       Timed & when = times_[n.position];
       if (!m_.tasks[n.task].durative) {
         starts(n);
+        started(n);
         instant(n, when);
       } else if (h.kind == 2) {
         starts(n);
+        started(n);
         running[h.position] = begin(
           m_.pddl.durative_actions[m_.tasks[n.task].action], n, when);
       } else {
@@ -1365,6 +1588,11 @@ private:
       if (!holds(world_.problem_eval, m_.problem.goal, env)) {
         invalid("the goal does not hold at the end of the plan");
       }
+    }
+    try {
+      check_times();
+    } catch (const Invalid & e) {
+      times_broken_ = e.reason;  // said once the rest is known to be right
     }
     if (temporal_) {
       validate_times();
@@ -1435,6 +1663,9 @@ private:
   static constexpr double kEpsilon = 0.001;  // between a step and the next, as in PDDL 2.1
   std::vector<Timed> times_;           // of the actions, in plan order
   std::vector<bool> durations_given_;  // by the plan
+  std::string times_broken_;
+  double now_ = 0.0;                // the time of what is taking place
+  std::vector<uint32_t> lasting_;   // nodes of durative methods with a condition, under way
   std::vector<Literal> literals_;  // the timed initial literals, in the order of time
   size_t next_literal_ = 0;        // the first that has not taken place
   bool timed_ = false;     // the plan gives the times
@@ -1454,6 +1685,11 @@ Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree, Or
     }
     if (order != nullptr) {
       verifier.order(*order);
+    }
+    if (!verifier.times_broken().empty()) {
+      Outcome broken{false, verifier.times_broken(), std::nullopt, {}};
+      broken.only_times = true;
+      return broken;
     }
     return Outcome{true, "", verifier.metric(), verifier.times()};
   } catch (const Invalid & e) {

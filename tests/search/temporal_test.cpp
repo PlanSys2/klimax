@@ -225,5 +225,153 @@ TEST(TemporalTest, TheVerifierFollowsTimedInitialLiterals)
   EXPECT_NEAR(*v.makespan, 14.002, 1e-9);
 }
 
+// Two workers and a job each, as the subtasks a and b of a network that says something of
+// their times
+const char * kJobs =
+  "(define (domain d) (:requirements :typing :hierarchy :durative-actions)\n"
+  " (:types worker)\n"
+  " (:predicates (idle ?w - worker) (done ?w - worker))\n"
+  " (:task job :parameters (?w - worker))\n"
+  " (:method m :parameters (?w - worker) :task (job ?w) :subtasks (and (work ?w)))\n"
+  " (:durative-action work :parameters (?w - worker) :duration (= ?duration 5)\n"
+  "  :condition (and (at start (idle ?w)))\n"
+  "  :effect (and (at start (not (idle ?w))) (at end (idle ?w)) (at end (done ?w)))))";
+
+std::string jobs(const std::string & ordering)
+{
+  return "(define (problem p) (:domain d) (:objects ann bob - worker)\n"
+         "(:htn :subtasks (and (a (job ann)) (b (job bob))) :ordering " + ordering + ")\n"
+         "(:init (idle ann) (idle bob)) (:goal (and (done ann) (done bob))))";
+}
+
+std::string jobs_plan(const std::string & ann, const std::string & bob)
+{
+  return "==>\n1 " + ann + ": (work ann) [5]\n2 " + bob + ": (work bob) [5]\nroot 3 4\n"
+         "3 job ann -> m 1\n4 job bob -> m 2\n<==\n";
+}
+
+TEST(TemporalTest, OrderingsBetweenTimePoints)
+{
+  auto valid = [](const std::string & ordering, const std::string & ann, const std::string & bob) {
+      return verify(kJobs, jobs(ordering), jobs_plan(ann, bob)).valid;
+    };
+  // Both start at once
+  EXPECT_TRUE(valid("(= (start a) (start b))", "0", "0"));
+  EXPECT_FALSE(valid("(= (start a) (start b))", "0", "1"));
+  // b starts later, however little; or not before
+  EXPECT_TRUE(valid("(< (start a) (start b))", "0", "1"));
+  EXPECT_FALSE(valid("(< (start a) (start b))", "0", "0"));
+  EXPECT_TRUE(valid("(<= (start a) (start b))", "0", "0"));
+  // b starts while a runs
+  const char * during = "(and (< (start a) (start b)) (< (start b) (end a)))";
+  EXPECT_TRUE(valid(during, "0", "3"));
+  EXPECT_FALSE(valid(during, "0", "5"));
+  // Between tasks: one ends, then the other starts, with no time asked in between
+  EXPECT_TRUE(valid("(< a b)", "0", "5"));
+  EXPECT_FALSE(valid("(< a b)", "0", "4"));
+  EXPECT_TRUE(valid("(> b a)", "0", "5"));
+  EXPECT_FALSE(valid("(> a b)", "0", "5"));
+  // Its negation: b has started when a ends
+  EXPECT_TRUE(valid("(not (< a b))", "0", "4"));
+  EXPECT_FALSE(valid("(not (< a b))", "0", "6"));
+  // With the points written, a comparison of times: strictly before
+  EXPECT_FALSE(valid("(< (end a) (start b))", "0", "5"));
+  EXPECT_TRUE(valid("(< (end a) (start b))", "0", "5.001"));
+}
+
+TEST(TemporalTest, ThePlanMeetsOrderingsBetweenTimePoints)
+{
+  // One action after another does not start them at once: the times of the plan do
+  SolveResult r = solve(kJobs, jobs("(= (start a) (start b))"));
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  ASSERT_TRUE(r.makespan.has_value());
+  EXPECT_NEAR(*r.makespan, 5.0, 1e-9) << r.plan;
+  EXPECT_TRUE(verify(kJobs, jobs("(= (start a) (start b))"), r.plan).valid);
+  // What the times found do not meet is said, not answered
+  r = solve(kJobs, jobs("(and (< (start a) (start b)) (< (start b) (end a)))"));
+  EXPECT_NE(r.status, Status::Unsolvable);
+  if (r.status == Status::Solved) {
+    EXPECT_TRUE(verify(kJobs,
+      jobs("(and (< (start a) (start b)) (< (start b) (end a)))"), r.plan).valid);
+  }
+}
+
+// A shift of two jobs, by a durative method that says what the whole may last
+std::string shifts(const std::string & duration, const std::string & condition = "")
+{
+  return "(define (domain d)\n"
+         " (:requirements :typing :hierarchy :durative-actions :durative-methods)\n"
+         " (:types worker)\n"
+         " (:predicates (idle ?w - worker) (done ?w - worker) (open))\n"
+         " (:task shift :parameters (?v ?w - worker))\n"
+         " (:durative-method both :parameters (?v ?w - worker) :task (shift ?v ?w)\n"
+         "  :duration " + duration + " " + condition + "\n"
+         "  :subtasks (and (x (work ?v)) (y (work ?w))))\n"
+         " (:durative-action work :parameters (?w - worker) :duration (= ?duration 5)\n"
+         "  :condition (and (at start (idle ?w)))\n"
+         "  :effect (and (at start (not (idle ?w))) (at end (idle ?w)) (at end (done ?w))))\n"
+         " (:action close :parameters () :effect (not (open))))";
+}
+
+const char * kShift = "(define (problem p) (:domain d) (:objects ann bob - worker)\n"
+  "(:htn :subtasks (and (shift ann bob))) (:init (idle ann) (idle bob) (open))\n"
+  "(:goal (and (done ann) (done bob))))";
+
+std::string shift_plan(const std::string & bob)
+{
+  return "==>\n1 0: (work ann) [5]\n2 " + bob + ": (work bob) [5]\nroot 3\n"
+         "3 shift ann bob -> both 1 2\n<==\n";
+}
+
+TEST(TemporalTest, DurationsOfMethods)
+{
+  // The whole in six units at most: the jobs overlap
+  EXPECT_TRUE(verify(shifts("(<= ?duration 6)"), kShift, shift_plan("1")).valid);
+  VerifyResult v = verify(shifts("(<= ?duration 6)"), kShift, shift_plan("5"));
+  EXPECT_FALSE(v.valid);
+  EXPECT_NE(v.reason.find("duration"), std::string::npos) << v.reason;
+  // The durations of subtasks, and several constraints
+  EXPECT_TRUE(verify(shifts("(= (duration x) (duration y))"), kShift, shift_plan("1")).valid);
+  EXPECT_FALSE(verify(shifts("(> (duration x) (duration y))"), kShift, shift_plan("1")).valid);
+  EXPECT_TRUE(verify(shifts("(and (>= ?duration 8) (<= ?duration (* 2 (duration x))))"), kShift,
+    shift_plan("3")).valid);
+  EXPECT_FALSE(verify(shifts("(and (>= ?duration 8) (<= ?duration (* 2 (duration x))))"), kShift,
+    shift_plan("1")).valid);
+  // The planner: one job after the other lasts ten, at once five
+  SolveResult r = solve(shifts("(<= ?duration 6)"), kShift);
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  ASSERT_TRUE(r.makespan.has_value());
+  EXPECT_NEAR(*r.makespan, 5.0, 1e-9) << r.plan;
+}
+
+TEST(TemporalTest, ConditionsOfDurativeMethods)
+{
+  // The shop is open while the shift lasts; closing it is another task of the problem
+  const char * p = "(define (problem p) (:domain d) (:objects ann bob - worker)\n"
+    "(:htn :subtasks (and (shift ann bob) (close))) (:init (idle ann) (idle bob) (open))\n"
+    "(:goal (and (done ann) (done bob))))";
+  auto plan = [](const std::string & close) {
+      return "==>\n1 0: (work ann) [5]\n2 1: (work bob) [5]\n4 " + close + ": (close) [0]\n"
+             "root 3 4\n3 shift ann bob -> both 1 2\n<==\n";
+    };
+  const std::string open = shifts("()", ":condition (and (at start (idle ?v)) (over all (open)))");
+  VerifyResult v = verify(open, p, plan("7"));
+  EXPECT_TRUE(v.valid) << v.reason;
+  v = verify(open, p, plan("3"));
+  EXPECT_FALSE(v.valid);
+  EXPECT_NE(v.reason.find("over all"), std::string::npos) << v.reason;
+  // At end: when the last of its actions has ended
+  EXPECT_TRUE(verify(shifts("()", ":condition (at end (done ?w))"), p, plan("7")).valid);
+  v = verify(shifts("()", ":condition (at end (open))"), p, plan("3"));
+  EXPECT_FALSE(v.valid);
+  EXPECT_NE(v.reason.find("at end"), std::string::npos) << v.reason;
+  // The planner closes after the shift
+  SolveResult r = solve(open, p);
+  EXPECT_NE(r.status, Status::Unsolvable);
+  if (r.status == Status::Solved) {
+    EXPECT_TRUE(verify(open, p, r.plan).valid) << r.plan;
+  }
+}
+
 }  // namespace
 }  // namespace klimax

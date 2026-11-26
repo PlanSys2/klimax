@@ -38,11 +38,30 @@ struct Subtask
   ast::Loc loc;
 };
 
-/// @brief "(< before after)".
+/// @brief What an ordering constraint says of a subtask: the task (the point depends on the
+/// side it is on), or when it starts or ends.
+enum class Point : uint8_t {Task, Start, End};
+
+/// @brief "(< before after)", and in HDDL 2.1 "(op x y)" with op one of <, <=, =, >=, > and
+/// each side an id, "(start id)" or "(end id)"; or "(not (op x y))".
 struct Order
 {
   Symbol before;
   Symbol after;
+  ast::Loc loc;
+  ast::CompareOp op = ast::CompareOp::Lt;
+  Point before_point = Point::Task;
+  Point after_point = Point::Task;
+  bool negated = false;
+};
+
+/// @brief "(op x y)" in the :duration of a method: each side ?duration (of the task
+/// decomposed), "(duration id)" (of a subtask) or a numeric expression.
+struct MethodDuration
+{
+  ast::CompareOp op = ast::CompareOp::Eq;
+  ast::ExprId lhs;
+  ast::ExprId rhs;
   ast::Loc loc;
 };
 
@@ -89,6 +108,10 @@ struct Method
   ast::FormulaId precondition;  // invalid if absent
   TaskNetwork network;
   ast::Loc loc;
+  // (:durative-method ...): a condition with at start, over all and at end in `precondition`,
+  // and constraints on durations
+  bool durative = false;
+  std::vector<MethodDuration> duration;
 };
 
 /// @brief Symbols and nodes of the HTN part live in `pddl`.

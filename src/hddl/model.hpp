@@ -79,10 +79,36 @@ struct SortConstraint
   bool negated = false;
 };
 
+/// @brief When step `a` starts or ends, compared with when step `b` does: <, <= or =.
+struct TimeConstraint
+{
+  uint32_t a = 0;
+  bool a_end = false;
+  uint32_t b = 0;
+  bool b_end = false;
+  ast::CompareOp op = ast::CompareOp::Le;
+};
+
+/// @brief A duration constraint of a method: two expressions of `pddl` over ?duration (of the
+/// task decomposed), "(duration id)" (of a step: MethodInfo::duration_of) and the numeric
+/// functions of the domain.
+struct DurationConstraint
+{
+  ast::CompareOp op = ast::CompareOp::Eq;
+  ast::ExprId lhs;
+  ast::ExprId rhs;
+};
+
 struct Network
 {
   std::vector<Step> steps;
-  std::vector<std::pair<uint32_t, uint32_t>> order;  // (a, b): step a before step b; acyclic
+  // (a, b): step a before step b, that is, a has ended when b starts; acyclic. What the
+  // searches order by
+  std::vector<std::pair<uint32_t, uint32_t>> order;
+  // HDDL 2.1: what the ordering constraints say of the times and `order` does not: a strict
+  // comparison of time points, or one that is not "ends before it starts". Checked on the
+  // times of a plan
+  std::vector<TimeConstraint> times;
   std::vector<VarConstraint> constraints;
   std::vector<SortConstraint> sorts;
   bool total_order = false;  // the order leaves a single sequence
@@ -108,6 +134,12 @@ struct MethodInfo
   bool artificial = false;  // added by parameter splitting: not part of a plan
   Network network;
   ast::Loc loc;
+  // (:durative-method ...). Its condition at start is the precondition above; the whole of
+  // it, with what must hold over all and at end, is this formula of `pddl` (invalid: none)
+  ast::FormulaId condition;
+  std::vector<DurationConstraint> durations;
+  // The step that each "(duration id)" in them names, by expression
+  std::vector<std::pair<ast::ExprId, uint32_t>> duration_of;
 };
 
 struct Model

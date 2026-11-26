@@ -46,6 +46,9 @@ struct Outcome
   // Valid, with durative actions: when each action of the plan starts and what it lasts, in
   // plan order. Those the plan gives, or one after another if it gives none.
   std::vector<Timed> times;
+  // Not valid, and only because its times break a constraint on times or durations: with
+  // other times the same actions and decomposition may be a plan
+  bool only_times = false;
 };
 
 /// @brief A step of a verified plan: an action, or a task with the method that decomposes it.

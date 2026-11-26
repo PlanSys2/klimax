@@ -75,6 +75,20 @@ void list_of(Fragments & p, const char * what, F && item)
   item(open, head);
 }
 
+bool comparison(const Token & t, ast::CompareOp & op)
+{
+  static const std::array<std::pair<std::string_view, ast::CompareOp>, 5> kOps = {{
+    {"<", ast::CompareOp::Lt}, {"<=", ast::CompareOp::Le}, {"=", ast::CompareOp::Eq},
+    {">=", ast::CompareOp::Ge}, {">", ast::CompareOp::Gt}}};
+  for (const auto & [text, value] : kOps) {
+    if (is_operator(t, text)) {
+      op = value;
+      return true;
+    }
+  }
+  return false;
+}
+
 // After "(" head: "(task args...)" or "(id (task args...))"
 Subtask parse_subtask(Fragments & p, const Token & open, const Token & head)
 {
@@ -148,14 +162,39 @@ bool parse_network_key(Fragments & p, const Token & key, const std::string & k, 
   }
   if (k == ":ordering" || k == ":order") {
     list_of(p, "an ordering constraint", [&](const Token & open, const Token & head) {
-        if (!is_operator(head, "<")) {
-          p.error("hddl.ordering", "expected '<' in an ordering constraint", head);
-        }
         Order o;
         o.loc = loc_of(open);
-        o.before = p.intern(p.expect(TokenKind::Name, "subtask id").text);
-        o.after = p.intern(p.expect(TokenKind::Name, "subtask id").text);
+        Token op = head;
+        if (is_word(head, "not")) {
+          o.negated = true;
+          p.expect(TokenKind::LParen, "'(' after 'not'");
+          op = p.next();
+        }
+        if (!comparison(op, o.op)) {
+          p.error("hddl.ordering", "expected '<', '<=', '=', '>=' or '>' in an ordering "
+            "constraint", op);
+        }
+        // An id, (start id) or (end id)
+        auto side = [&](Symbol & id, Point & point) {
+            if (p.peek().kind != TokenKind::LParen) {
+              id = p.intern(p.expect(TokenKind::Name, "subtask id").text);
+              return;
+            }
+            p.next();
+            const Token which = p.next();
+            if (!is_word(which, "start") && !is_word(which, "end")) {
+              p.error("hddl.ordering", "expected 'start' or 'end' before a subtask id", which);
+            }
+            point = is_word(which, "start") ? Point::Start : Point::End;
+            id = p.intern(p.expect(TokenKind::Name, "subtask id").text);
+            p.expect(TokenKind::RParen, "')' closing the time point");
+          };
+        side(o.before, o.before_point);
+        side(o.after, o.after_point);
         p.expect(TokenKind::RParen, "')' closing the ordering constraint");
+        if (o.negated) {
+          p.expect(TokenKind::RParen, "')' closing 'not'");
+        }
         n.ordering.push_back(o);
       });
     return true;
@@ -216,9 +255,41 @@ Task parse_task(Fragments & p, const Token & keyword)
   return t;
 }
 
-Method parse_method(Fragments & p, const Token & keyword)
+// "(op x y)", "(at start (op x y))", "(at end (op x y))", "(and ...)" of those, or "()"
+void parse_durations(Fragments & p, std::vector<MethodDuration> & out)
+{
+  list_of(p, "a duration constraint", [&](const Token & open, const Token & head) {
+      MethodDuration d;
+      d.loc = loc_of(open);
+      Token op = head;
+      const bool timed = is_word(head, "at");
+      if (timed) {
+        // When the expressions are evaluated: Klimax reads them at the start (semantics.md)
+        const Token which = p.next();
+        if (!is_word(which, "start") && !is_word(which, "end")) {
+          p.error("hddl.duration", "expected 'start' or 'end' after 'at'", which);
+        }
+        p.expect(TokenKind::LParen, "'(' starting the duration constraint");
+        op = p.next();
+      }
+      if (!comparison(op, d.op)) {
+        p.error("hddl.duration", "expected '<', '<=', '=', '>=' or '>' in a duration "
+          "constraint", op);
+      }
+      d.lhs = p.expression();
+      d.rhs = p.expression();
+      p.expect(TokenKind::RParen, "')' closing the duration constraint");
+      if (timed) {
+        p.expect(TokenKind::RParen, "')' closing 'at'");
+      }
+      out.push_back(d);
+    });
+}
+
+Method parse_method(Fragments & p, const Token & keyword, bool durative)
 {
   Method m;
+  m.durative = durative;
   m.loc = loc_of(keyword);
   m.name = p.intern(p.expect(TokenKind::Name, "method name").text);
   std::set<std::string> seen;
@@ -235,8 +306,12 @@ Method parse_method(Fragments & p, const Token & keyword)
         m.task_args.push_back(p.term());
       }
       p.next();
-    } else if (k == ":precondition") {
+    } else if (k == ":precondition" && !durative) {
       m.precondition = p.condition(false, false);
+    } else if ((k == ":condition" || k == ":precondition") && durative) {
+      m.precondition = p.condition(true, false);
+    } else if (k == ":duration" && durative) {
+      parse_durations(p, m.duration);
     } else if (!parse_network_key(p, key, k, m.network)) {
       p.error("parse.unknown_key", "unknown key " + k + " in method", key);
     }
@@ -276,8 +351,8 @@ kairos::Result<Domain> parse_domain(std::string_view text, std::string_view file
         domain.tasks.push_back(parse_task(p, keyword));
         return true;
       }
-      if (k == ":method") {
-        domain.methods.push_back(parse_method(p, keyword));
+      if (k == ":method" || k == ":durative-method") {
+        domain.methods.push_back(parse_method(p, keyword, k == ":durative-method"));
         return true;
       }
       return false;

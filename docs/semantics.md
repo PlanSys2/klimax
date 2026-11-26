@@ -104,15 +104,21 @@ Every task occurrence `t` has two time points, `start(t)` and `end(t)`, with
    durations in one section and "the max" in another. Klimax takes the tightest interval the 2023
    constraints allow: with containment alone, a constraint such as `(>= ?duration 10)` would be
    met by any decomposition, since the task could always be stretched.
-4. **Ordering constraints** compare time points with `<`, `<=`, `=`, `>=`, `>`. A bare task id
-   stands for a point by its side: `(< a b)` means `end(a) < start(b)`, as in HDDL 1.0.
-   `:ordered-subtasks` means `end(si) ≤ start(si+1)` **[decision]** (not strict: two consecutive
-   instantaneous actions at the same instant are ordered by the sequence, as in PDDL 2.1 plans
-   with `ε`). `(not (< a b))` is the complement comparison.
-5. **Method duration constraints** compare `?duration`, which is `end(t) − start(t)` of the task
-   decomposed, and `(duration id)`, which is `end − start` of a subtask, with numeric
-   expressions. Expressions are evaluated in the state at `start(t)` **[decision]**, as PDDL 2.1
-   does for actions.
+4. **Ordering constraints** compare time points with `<`, `<=`, `=`, `>=`, `>`: `(start id)`
+   and `(end id)`, as times. A bare task id stands for a point by its side: its end on the
+   smaller side and its start on the larger one, so `(> a b)` is `(< b a)`. **[decision]**
+   Between two bare ids `<` is the ordering of HDDL 1.0, "a ends, then b starts":
+   `end(a) ≤ start(b)`, with no time asked in between, and `:ordered-subtasks` is that between
+   each subtask and the next (two consecutive instantaneous actions at the same instant are
+   ordered by the sequence, as in PDDL 2.1 plans with `ε`). With a time point written, `<` is
+   strict: `(< (end a) (start b))` asks for b to start later than a ends. `(not (< x y))` is
+   `(<= y x)` on the same points. **[decision]** `=` needs the points written, and its negation
+   is not accepted.
+5. **Method duration constraints** compare expressions over `?duration`, which is
+   `end(t) − start(t)` of the task decomposed, `(duration id)`, which is `end − start` of a
+   subtask, numbers and the numeric functions of the domain. The functions are read in the state
+   in which the method is applied **[decision]**, as PDDL 2.1 does at the start of an action;
+   `(at start ...)` and `(at end ...)` around a constraint are read and do not change that.
 6. **Durative method condition**: `at start` holds at `start(t)`, `at end` at `end(t)`, `over all`
    in the open interval between them. A plain `:precondition` on a durative method means
    `at start`.

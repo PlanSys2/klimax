@@ -139,9 +139,52 @@ private:
       }
       a.precondition = method.precondition;
       a.loc = method.loc;
+      if (method.durative) {
+        // The search tests what must hold at start; Kairos also reads the rest, as an action
+        // that nothing asks for, so that its names and types are checked
+        ast::Action rest = a;
+        rest.name = m_.pddl.symbols.intern(
+          std::string(kPreconditionPrefix) + "later " +
+          std::string(m_.pddl.symbols.name(method.name)) + "#" + std::to_string(i));
+        a.precondition = part(method.precondition, true);
+        rest.precondition = part(method.precondition, false);
+        later_.push_back(std::move(rest));
+      }
       precondition_action_[i] = static_cast<int32_t>(m_.pddl.actions.size());
       m_.pddl.actions.push_back(std::move(a));
     }
+    for (ast::Action & a : later_) {
+      m_.pddl.actions.push_back(std::move(a));
+    }
+  }
+
+  // Of the condition of a durative method, what must hold at start, or the rest (over all and
+  // at end), as one conjunction without the words of time
+  ast::FormulaId part(ast::FormulaId id, bool at_start)
+  {
+    ast::Formula all;
+    all.kind = ast::FormulaKind::And;
+    all.loc = m_.pddl.nodes.formulas[id].loc;
+    std::vector<ast::FormulaId> pending{id};
+    while (!pending.empty()) {
+      const ast::FormulaId current = pending.back();
+      const ast::Formula f = m_.pddl.nodes.formulas[current];
+      pending.pop_back();
+      if (f.kind == ast::FormulaKind::And) {
+        pending.insert(pending.end(), f.children.begin(), f.children.end());
+      } else if (f.kind == ast::FormulaKind::AtStart) {
+        if (at_start) {
+          all.children.insert(all.children.end(), f.children.begin(), f.children.end());
+        }
+      } else if (f.kind == ast::FormulaKind::OverAll || f.kind == ast::FormulaKind::AtEnd) {
+        if (!at_start) {
+          all.children.insert(all.children.end(), f.children.begin(), f.children.end());
+        }
+      } else if (at_start) {
+        all.children.push_back(current);  // without a word of time: at start
+      }
+    }
+    return m_.pddl.nodes.formulas.push_back(std::move(all));
   }
 
   // The variables a formula mentions (bound ones included: a superset is enough)
@@ -317,7 +360,9 @@ private:
     return args;
   }
 
-  Network analyze_network(const TaskNetwork & in, const std::vector<Param> & params)
+  Network analyze_network(
+    const TaskNetwork & in, const std::vector<Param> & params,
+    std::unordered_map<std::string, uint32_t> * ids_out = nullptr)
   {
     Network out;
     std::unordered_map<std::string, uint32_t> ids;
@@ -353,7 +398,10 @@ private:
           name(a == ids.end() ? o.before : o.after), o.loc);
         continue;
       }
-      out.order.emplace_back(a->second, b->second);
+      order(o, a->second, b->second, out);
+    }
+    if (ids_out != nullptr) {
+      *ids_out = ids;
     }
     out.total_order = check_order(out, n, in.ordering.empty() ? ast::Loc{} : in.ordering[0].loc);
 
@@ -418,6 +466,101 @@ private:
     return total;
   }
 
+  // An ordering constraint of HDDL 2.1 as a comparison of two time points with <, <= or =.
+  // An id alone is the point on its side: (< a b) is "a ends, then b starts", the ordering of
+  // HDDL 1.0, which does not ask for time in between; (> a b) is (< b a)
+  void order(const Order & o, uint32_t before, uint32_t after, Network & out)
+  {
+    const bool plain = o.before_point == Point::Task && o.after_point == Point::Task &&
+      !o.negated;
+    if (o.op == ast::CompareOp::Eq && (o.negated || o.before_point == Point::Task ||
+      o.after_point == Point::Task))
+    {
+      error("hddl.ordering", o.negated ?
+        "'not' of an equality between time points is not supported" :
+        "'=' compares time points: write (start id) or (end id)", o.loc);
+      return;
+    }
+    // The points as written, with the smaller side of the comparison first
+    const bool greater = o.op == ast::CompareOp::Gt || o.op == ast::CompareOp::Ge;
+    TimeConstraint t;
+    t.a = greater ? after : before;
+    t.b = greater ? before : after;
+    const Point a_point = greater ? o.after_point : o.before_point;
+    const Point b_point = greater ? o.before_point : o.after_point;
+    t.a_end = a_point != Point::Start;  // the smaller side: a task is its end
+    t.b_end = b_point == Point::End;    // the larger side: its start
+    t.op = o.op == ast::CompareOp::Eq ? ast::CompareOp::Eq :
+      (o.op == ast::CompareOp::Lt || o.op == ast::CompareOp::Gt) ? ast::CompareOp::Lt :
+      ast::CompareOp::Le;
+    if (o.negated) {
+      // not (x < y) is y <= x, and not (x <= y) is y < x
+      std::swap(t.a, t.b);
+      std::swap(t.a_end, t.b_end);
+      t.op = t.op == ast::CompareOp::Lt ? ast::CompareOp::Le : ast::CompareOp::Lt;
+    }
+    if (t.a == t.b && t.a_end && !t.b_end) {
+      error("hddl.ordering", "a subtask cannot end before it starts", o.loc);
+      return;
+    }
+    const bool precedence = t.a_end && !t.b_end && t.op != ast::CompareOp::Eq && t.a != t.b;
+    if (precedence) {
+      out.order.emplace_back(t.a, t.b);
+    }
+    // Between tasks, the ordering is all there is to it
+    if (!(precedence && (plain || t.op == ast::CompareOp::Le))) {
+      out.times.push_back(t);
+    }
+  }
+
+  // An expression of a duration constraint: numbers, ?duration, (duration id) and the numeric
+  // functions of the domain
+  void check_duration(
+    ast::ExprId id, const std::unordered_map<std::string, uint32_t> & ids, ast::Loc loc,
+    MethodInfo & out)
+  {
+    const ast::Expr & e = m_.pddl.nodes.exprs[id];
+    switch (e.kind) {
+      case ast::ExprKind::Number:
+      case ast::ExprKind::Duration:
+        return;
+      case ast::ExprKind::Function: {
+          if (name(e.name) == "duration" && e.args.size() == 1 &&
+            m_.pddl.nodes.terms[e.args[0]].kind == ast::TermKind::Name)
+          {
+            const auto step = ids.find(name(m_.pddl.nodes.terms[e.args[0]].name));
+            if (step == ids.end()) {
+              error("hddl.unknown_subtask_id", "unknown subtask id " +
+                name(m_.pddl.nodes.terms[e.args[0]].name), loc);
+            } else {
+              out.duration_of.emplace_back(id, step->second);
+            }
+            return;
+          }
+          const auto f = m_.domain.functions.find(name(e.name));
+          if (!f || !m_.domain.functions.items[*f].numeric ||
+            m_.domain.functions.items[*f].params.size() != e.args.size())
+          {
+            error("hddl.duration", name(e.name) + " is not a numeric function with these "
+              "arguments", loc);
+          }
+          return;
+        }
+      case ast::ExprKind::Add:
+      case ast::ExprKind::Sub:
+      case ast::ExprKind::Mul:
+      case ast::ExprKind::Div:
+      case ast::ExprKind::Neg:
+        for (ast::ExprId c : e.children) {
+          check_duration(c, ids, loc, out);
+        }
+        return;
+      default:
+        error("hddl.duration", "a duration is compared with ?duration, (duration id) or a "
+          "numeric expression", loc);
+    }
+  }
+
   void analyze_method(size_t index)
   {
     const Method & in = methods_[index];
@@ -442,7 +585,16 @@ private:
       return;
     }
     out.task_args = resolve_args(m_.tasks[out.task], in.task_args, out.params, in.task_loc);
-    out.network = analyze_network(in.network, out.params);
+    std::unordered_map<std::string, uint32_t> ids;
+    out.network = analyze_network(in.network, out.params, &ids);
+    if (in.durative) {
+      out.condition = in.precondition;
+      for (const MethodDuration & d : in.duration) {
+        check_duration(d.lhs, ids, d.loc, out);
+        check_duration(d.rhs, ids, d.loc, out);
+        out.durations.push_back(DurationConstraint{d.op, d.lhs, d.rhs});
+      }
+    }
     m_.methods.push_back(std::move(out));
   }
 
@@ -471,6 +623,7 @@ private:
   std::vector<Diagnostic> diagnostics_;
   bool errors_ = false;
   std::vector<int32_t> precondition_action_;
+  std::vector<ast::Action> later_;  // what durative methods ask over all and at end
   std::vector<std::vector<uint32_t>> precondition_params_;
   std::unordered_map<std::string, size_t> task_index_;
   std::unordered_set<std::string> method_names_;

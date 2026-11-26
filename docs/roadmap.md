@@ -46,7 +46,9 @@ in [baseline.md](baseline.md).
   each action as early as what it reads and writes and the orderings of the hierarchy allow,
   so actions that neither orders run at once. Kairos' validator checks every plan as a temporal
   plan of PDDL 2.1. The verifier reads plans with times and durations, with actions that
-  overlap. Timed initial literals: a step waits for the one it needs (a clock that every step
+  overlap, and checks all that HDDL 2.1 says of time in a method: orderings between the starts
+  and the ends of subtasks, durative methods with their conditions at start, over all and at
+  end, and constraints on the durations of a task and of its subtasks. Timed initial literals: a step waits for the one it needs (a clock that every step
   moves on, and each literal as the intervals of that clock in which it holds).
 - **Anytime and optimal** (H4): after the first plan Klimax looks for better ones and proves
   when none exists, with total and with partial order.
@@ -73,9 +75,11 @@ in [baseline.md](baseline.md).
 - Of time: plans are found with one durative action after another, and only then made
   shorter. A problem that needs actions to overlap (one that needs what another gives only
   while it runs) is reported as not supported, and so is one with no plan of that kind, never
-  as unsolvable. Durative methods, the duration and the time points of tasks in constraints,
-  `?duration` inside conditions or effects, and timed initial values of fluents are not read
-  yet either: not supported, never accepted. An action that reads an atom of a timed initial
+  as unsolvable. The searches order subtasks only by "ends before it starts": the other
+  constraints on time points and on durations, and what a durative method asks over all and at
+  end, are met by the times given to the plan found or the problem is reported as not
+  supported. `?duration` inside conditions or effects and timed initial values of fluents are
+  not read yet. An action that reads an atom of a timed initial
   literal is planned as needing it from its start to its end, whatever the domain says: some
   plans are not found. The verifier does follow
   plans whose actions overlap.

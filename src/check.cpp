@@ -580,14 +580,37 @@ SolveResult solve(
           const verifier::Outcome checked = verifier::verify(
             model.value(), found.plan, options.decomposition ? &tree : nullptr,
             temporal ? &order : nullptr);
-          if (!checked.valid && temporal) {
+          // With one action after another the times break a constraint that others may meet
+          std::vector<verifier::Timed> rescued;
+          if (!checked.valid && checked.only_times && order.complete) {
+            rescued = schedule(model.value(), order.actions, order.before);
+            if (!rescued.empty() &&
+              !verifier::verify(model.value(), with_times(found.plan, rescued)).valid)
+            {
+              rescued.clear();
+            }
+          }
+          if (!rescued.empty()) {
+            result.plan = with_times(result.plan, rescued);
+            result.makespan = 0.0;
+            for (const verifier::Timed & t : rescued) {
+              result.makespan = std::max(*result.makespan, t.time + t.duration);
+            }
+            if (options.decomposition) {
+              verifier::verify(model.value(), with_times(found.plan, rescued), &tree);
+              fill(result, tree, spelling);
+            }
+            break;
+          }
+          if (!checked.valid && (temporal || checked.only_times)) {
             // Found taking each durative action as one step: where that is not enough (an
             // action needs what another gives only while it runs) the plan is not one
             result.status = Status::Unsupported;
             result.message = checked.reason.rfind("unsupported: ", 0) == 0 ?
               checked.reason.substr(13) :
               "the plan found with each durative action as one step is not valid (" +
-              checked.reason + "): actions that must overlap are not planned yet";
+              checked.reason + "): actions that must overlap, and constraints on times and "
+              "durations that the first plan found does not meet, are not planned with yet";
             result.plan.clear();
             break;
           }

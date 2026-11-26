@@ -174,7 +174,7 @@ TEST(HddlParserTest, Errors)
   EXPECT_EQ(domain_errors(in_domain("(:method m :task (t) :subtasks (u) :ordered-subtasks (v))")),
     V{"parse.duplicate_key"});
   EXPECT_EQ(domain_errors(in_domain("(:method m :task (t) :effect (p))")), V{"parse.unknown_key"});
-  EXPECT_EQ(domain_errors(in_domain("(:method m :task (t) :ordering (> a b))")),
+  EXPECT_EQ(domain_errors(in_domain("(:method m :task (t) :ordering (+ a b))")),
     V{"hddl.ordering"});
   EXPECT_EQ(domain_errors(in_domain("(:method m :task (t) :constraints (p ?x))")),
     V{"hddl.constraint"});
@@ -189,7 +189,7 @@ TEST(HddlParserTest, Errors)
 
 TEST(HddlParserTest, ErrorPosition)
 {
-  auto r = parse_domain(in_domain("(:method m :parameters ()\n   :task (t) :ordering (> a b))"),
+  auto r = parse_domain(in_domain("(:method m :parameters ()\n   :task (t) :ordering (+ a b))"),
       "d.hddl");
   ASSERT_FALSE(r.ok());
   ASSERT_TRUE(r.diagnostics().at(0).location.has_value());

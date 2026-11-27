@@ -198,6 +198,91 @@ Both planners get the same problem through Unified Planning, at 30 s per problem
   read the timed initial literals, the plans stay with one action after another. In Cellar no
   such plan exists, and the start and the end of each action are planned as two steps.
 
+## By feature
+
+What each planner solves of the problems that use each feature of HDDL 2.1, as `klimax --check`
+reports them (`docs/semantics.md`): all the problems above (IPC 2023, numeric and temporal) by
+the features of their domain, and the families by feature of
+[klimax-benchmarks](https://github.com/PlanSys2/klimax-benchmarks) (`features/`: object
+fluents, action costs, conditional effects, orderings between time points, durative methods and
+constraints on states; five problems with a plan in each). Same limits as above; a problem a
+planner does not take (one it cannot read) counts as not solved. The plans of the families are
+verified by Klimax's verifier, the IPC verifier reading only HDDL 1.0 (it ignores the
+constraints on states that the plans of `rooms` must meet).
+
+At 30 s:
+
+| Feature | Problems | Klimax | Aries | PANDA | PANDA ppro | PANDA lamda | PandaDealer | PandaDealer lama | Linear-Simple | Linear-Complex | TOAD | SIADEX | Lilotane | HyperTensioN | PDDL4J |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| hierarchy | 1254 | **1066** | 225 | 407 | 614 | 646 | 494 | 494 | 605 | 661 | 350 | 214 | 309 | 332 | 244 |
+| partial-order-initial | 274 | **248** | 104 | 101 | 106 | 105 | 0 | 0 | 151 | 151 | 0 | 85 | 0 | 0 | 0 |
+| partial-order-methods | 141 | **127** | 43 | 76 | 80 | 76 | 0 | 0 | 86 | 83 | 0 | 31 | 0 | 0 | 0 |
+| recursion | 1030 | **843** | 127 | 306 | 506 | 536 | 458 | 460 | 458 | 513 | 314 | 130 | 263 | 307 | 198 |
+| method-preconditions | 1117 | **932** | 172 | 343 | 539 | 563 | 472 | 464 | 524 | 579 | 343 | 187 | 276 | 300 | 213 |
+| free-method-parameters | 1202 | **1017** | 213 | 393 | 600 | 632 | 494 | 494 | 591 | 647 | 350 | 214 | 309 | 332 | 244 |
+| empty-methods | 616 | **465** | 38 | 153 | 275 | 301 | 298 | 291 | 254 | 309 | 218 | 87 | 108 | 165 | 59 |
+| method-constraints | 137 | **127** | 53 | 88 | 95 | 93 | 22 | 23 | 103 | 104 | 0 | 62 | 39 | 20 | 33 |
+| goal | 718 | **647** | 149 | 271 | 439 | 433 | 330 | 325 | 398 | 409 | 259 | 112 | 197 | 201 | 166 |
+| durative-actions | 50 | **50** | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| timed-initial-literals | 10 | **10** | **10** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| durative-methods | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| method-durations | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| time-point-orderings | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| state-constraints | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| numeric-fluents | 195 | **180** | 59 | 3 | 5 | 5 | 0 | 0 | 5 | 5 | 0 | 0 | 0 | 0 | 0 |
+| action-costs | 5 | **5** | 0 | 3 | **5** | **5** | 0 | 0 | **5** | **5** | 0 | 0 | 0 | 0 | 0 |
+| metric | 5 | **5** | 0 | 3 | **5** | **5** | 0 | 0 | **5** | **5** | 0 | 0 | 0 | 0 | 0 |
+| object-fluents | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| conditional-effects | 5 | **5** | 0 | 3 | 3 | 3 | 0 | 0 | 3 | 3 | 0 | 1 | 0 | 0 | 0 |
+| negative-preconditions | 942 | **767** | 126 | 299 | 497 | 520 | 441 | 435 | 474 | 528 | 309 | 170 | 238 | 284 | 179 |
+| equality | 362 | **300** | 76 | 109 | 148 | 143 | 113 | 111 | 178 | 181 | 75 | 59 | 119 | 91 | 106 |
+| universal-preconditions | 221 | **188** | 28 | 59 | 146 | 140 | 123 | 120 | 109 | 122 | 91 | 16 | 43 | 51 | 33 |
+| metric-fluents | 5 | **5** | 0 | 3 | **5** | **5** | 0 | 0 | **5** | **5** | 0 | 0 | 0 | 0 | 0 |
+| **all** | 1254 | 1066 | 225 | 407 | 614 | 646 | 494 | 494 | 605 | 661 | 350 | 214 | 309 | 332 | 244 |
+
+At 1 s (the two PANDA configurations of IPC 2023 were measured at 30 s only):
+
+| Feature | Problems | Klimax | Aries | PANDA | PandaDealer | PandaDealer lama | Linear-Simple | Linear-Complex | TOAD | SIADEX | Lilotane | HyperTensioN | PDDL4J |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| hierarchy | 1254 | **837** | 119 | 279 | 307 | 299 | 414 | 455 | 203 | 165 | 164 | 294 | 135 |
+| partial-order-initial | 274 | **207** | 69 | 89 | 0 | 0 | 142 | 142 | 0 | 82 | 0 | 0 | 0 |
+| partial-order-methods | 141 | **94** | 29 | 45 | 0 | 0 | 45 | 46 | 0 | 26 | 0 | 0 | 0 |
+| recursion | 1030 | **655** | 42 | 197 | 279 | 269 | 284 | 321 | 183 | 88 | 127 | 270 | 100 |
+| method-preconditions | 1117 | **719** | 86 | 224 | 285 | 270 | 340 | 379 | 197 | 138 | 139 | 262 | 109 |
+| free-method-parameters | 1202 | **788** | 116 | 265 | 307 | 299 | 400 | 441 | 203 | 165 | 164 | 294 | 135 |
+| empty-methods | 616 | **364** | 19 | 103 | 175 | 162 | 176 | 212 | 112 | 63 | 48 | 144 | 32 |
+| method-constraints | 137 | **83** | 31 | 46 | 0 | 0 | 47 | 47 | 0 | 53 | 8 | 17 | 6 |
+| goal | 718 | **522** | 80 | 189 | 211 | 202 | 261 | 277 | 160 | 85 | 112 | 182 | 88 |
+| durative-actions | 50 | **44** | 29 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| timed-initial-literals | 10 | **10** | 9 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| durative-methods | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| method-durations | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| time-point-orderings | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| state-constraints | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| numeric-fluents | 195 | **155** | 37 | 1 | 0 | 0 | 5 | 5 | 0 | 0 | 0 | 0 | 0 |
+| action-costs | 5 | **5** | 0 | 1 | 0 | 0 | **5** | **5** | 0 | 0 | 0 | 0 | 0 |
+| metric | 5 | **5** | 0 | 1 | 0 | 0 | **5** | **5** | 0 | 0 | 0 | 0 | 0 |
+| object-fluents | 5 | **5** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| conditional-effects | 5 | **4** | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 1 | 0 | 0 | 0 |
+| negative-preconditions | 942 | **603** | 61 | 191 | 263 | 246 | 298 | 336 | 175 | 123 | 109 | 247 | 83 |
+| equality | 362 | **205** | 24 | 48 | 64 | 65 | 94 | 99 | 40 | 43 | 64 | 86 | 57 |
+| universal-preconditions | 221 | **130** | 6 | 12 | 59 | 51 | 36 | 48 | 42 | 7 | 9 | 45 | 6 |
+| metric-fluents | 5 | **5** | 0 | 1 | 0 | 0 | **5** | **5** | 0 | 0 | 0 | 0 | 0 |
+| **all** | 1254 | 837 | 119 | 279 | 307 | 299 | 414 | 455 | 203 | 165 | 164 | 294 | 135 |
+
+- No planner gives a plan for the problems of the families that have none (`p06` of each).
+  Klimax proves three of them unsolvable and reports the other three as not supported.
+- Aries' invalid plans: three of the IPC (a method's precondition not applied, plaans/aries#284)
+  and five of the temporal benchmark (durations 0.1 longer than the problem's). TOAD's four are
+  of the IPC.
+- Aries' numeric and temporal results are through Unified Planning (`up-aries` 0.5.0), which
+  costs it about 0.65 s of Python at start: at 1 s that weighs; at 30 s it does not. Its
+  executable reads none of the families by feature, which use what its HDDL reader does not
+  take; through Unified Planning they cannot be expressed (orderings between time points,
+  durative methods and constraints on states are not in it).
+- Planners that ignore the metric still solve `couriers`: their plans are valid, not the
+  cheapest.
+
 ## Notes
 
 - The Klimax rows come from one run at 30 s per track, as those of the baseline do, on the same

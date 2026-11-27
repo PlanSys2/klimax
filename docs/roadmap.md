@@ -106,7 +106,9 @@ From before:
   initial
   literal is planned as needing it from its start to its end, whatever the domain says: some
   plans are not found. The verifier does follow
-  plans whose actions overlap.
+  plans whose actions overlap. So two actions that must start at once and last differently,
+  with something after both, are reported as not supported: four of the five problems of the
+  `meetings` family of [klimax-benchmarks](https://github.com/PlanSys2/klimax-benchmarks).
 - Where a resource decides the plan the heuristics do not see it: the seven largest problems
   of Transport_fuel (58 to 82 places) run out of time, and take 0.15 s without the fuel.
 - Of object fluents: two that must differ, or that must be equal in the goal, are not planned

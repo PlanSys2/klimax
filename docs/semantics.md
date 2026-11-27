@@ -210,6 +210,9 @@ benchmark and the verifier as evidence:
 4. Where the numeric expressions of a method duration constraint are evaluated.
 5. A plan format for temporal hierarchical plans, and a verifier.
 6. Natural numbers against rationals for time (3.2, point 8).
+7. What executing a hierarchical plan means (section 8): neither paper says when a method's
+   precondition must hold once the plan runs, what an action that starts later must wait for, or
+   what is left to do when a running plan is replanned.
 
 ## 7. The plan verifier
 
@@ -233,3 +236,47 @@ reordered):
   case-insensitive) and rejects the 159 with other characters replaced.
 - The one difference is a variation in which a method with one subtask is applied with none
   (Rover, `m-navigate_abs-3`). The IPC verifier accepts it; Klimax rejects it.
+
+## 8. Executing a plan
+
+HDDL 2.1 defines what a solution is, not how one is executed. A robot executes a plan in a world
+that may not do what the planner expected, and the hierarchy of the plan says more than its
+actions about what was meant. This section is the semantics of execution Klimax gives its plans
+for, and the one that PlanSys2 (its `HTNBTBuilder`) implements. **[decision]** all of it.
+
+What the plan carries, besides its actions (`PlanStep`, `klimax::check.hpp`): its decomposition,
+the precondition of each method with the values of its parameters, the ordering of each
+network, and where each method was applied (`applied_after`: how many actions of the plan had
+ended; `applied_at`: the time, in a plan with times).
+
+1. **Where a method's precondition is checked**: where the plan applied the method, not when its
+   task starts. That is once the actions that end by then have ended, and before any action that
+   starts later. A planner may apply a method long before its subtasks run (interleaving the
+   tasks of a partially ordered network), and other actions may meanwhile change what the method
+   needed: that is allowed by the solution, since the precondition held when the method was
+   applied. So the check waits for the actions that end before it, and the actions that start
+   after it wait for the check, whatever task they belong to.
+2. **A method that no longer applies fails its task** before any action of it starts: the
+   decomposition the plan chose is not valid in the world as it is. The executor says which task
+   and which part of the precondition does not hold.
+3. **Order**: subtasks that the method orders run one after the other; those it does not order
+   may run at once, each action waiting for the actions that end before it starts in the plan.
+   Times are the same within half the plan's `ε`.
+4. **A task with no actions** (a method with no subtasks) is only its check.
+5. **Replanning a running plan**: what is left to do is a task network, not a goal. Its tasks:
+   those of which no action has ended, whole (the planner may decompose them in another way), and
+   of the tasks done in part, their subtasks, down to the actions not ended. Each keeps the
+   orderings of the methods above it. A task with no actions goes in only if it comes after
+   something not done. The state is the one before the running actions began, as PDDL
+   executors do, so that a new plan may keep them: an action that goes on is not started again.
+   What was done stays done, and the choices inside a task already begun stay made (the pieces of
+   a car, the robot that assembles it); only what was not begun may be done differently.
+6. **The methods applied at the start of a new plan** were applied in that state, before the
+   actions that go on began: they are checked there, not in the world those actions have changed
+   since.
+
+Point 5 keeps less than the hierarchy could: an ordering between time points (3.2, point 4) of a
+task left whole is kept, since the task is decomposed again, but one between tasks done in part
+is not. What must hold until the end of a task belongs in the conditions of its actions, not only
+in the precondition of its method: once applied, a method is not checked again.
+

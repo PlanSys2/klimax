@@ -31,6 +31,7 @@
 #include "ground/datalog.hpp"
 #include "ground/grounder.hpp"
 #include "hddl/split.hpp"
+#include "tdg/axioms.hpp"
 #include "tdg/compress.hpp"
 #include "tdg/object_fluents.hpp"
 #include "tdg/timed.hpp"
@@ -181,6 +182,11 @@ public:
       // Object fluents as atoms, for searches and heuristics that know nothing else. Where
       // that cannot be done they stay, and the searches refuse the problem
       object_fluents_as_atoms(p_.pddl, m_);
+      // Derived atoms (of quantified conditions) by their definitions, for the same searches;
+      // where that cannot be done they stay, and the searches refuse the problem
+      if (const std::string kept = inline_axioms(p_.pddl); !kept.empty() && trace_) {
+        std::fprintf(stderr, "axioms kept: %s\n", kept.c_str());
+      }
       if (std::string unsupported = timed_literals(p_.pddl); !unsupported.empty()) {
         return kairos::Result<Problem>::failure(
           {kairos::Diagnostic::error("ground.unsupported", "not planned with yet: " +

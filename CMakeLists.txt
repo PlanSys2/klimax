@@ -15,7 +15,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(klimax
-  VERSION 0.0.1
+  VERSION 1.0.0
   DESCRIPTION "HTN planner for HDDL 2.1: hierarchical, numeric and temporal"
   LANGUAGES CXX)
 
@@ -43,7 +43,7 @@ set(KLIMAX_SANITIZE "" CACHE STRING "Sanitizers: empty or 'address;undefined'")
 include(GNUInstallDirs)
 
 # Klimax is built on Kairos' modules: Kairos must be installed with -DKAIROS_INSTALL_CORE=ON
-find_package(kairos 1.0.6 REQUIRED)
+find_package(kairos 1.0.7 REQUIRED)
 if(NOT TARGET kairos::core)
   message(FATAL_ERROR
     "This Kairos has no kairos::core. Build Kairos with -DKAIROS_INSTALL_CORE=ON.")

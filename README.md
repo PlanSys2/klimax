@@ -94,6 +94,8 @@ target_link_libraries(my_target PRIVATE klimax::klimax)
 
 ### Python
 
+`pip install klimax-planner` (Linux, x86-64 and arm64, Python 3.10 or later).
+
 ```python
 import klimax
 

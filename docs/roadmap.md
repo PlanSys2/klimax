@@ -14,7 +14,7 @@ in [baseline.md](baseline.md).
 | H4 | done | Anytime search, optimal plans, finer heuristics | Best satisficing score; optimal coverage at least that of the baseline |
 | H5 | done | Numbers | More problems of the numeric HTN benchmark than its authors' planner |
 | H6 | done | Time: the whole of HDDL 2.1, with a reference benchmark ([klimax-benchmarks](https://github.com/PlanSys2/klimax-benchmarks)) | Solves the benchmark with validated plans |
-| H7 | planned | Robustness, fuzzing, PlanSys2 plugin, version 1.0.0 | As Kairos |
+| H7 | done | Robustness, fuzzing, PlanSys2 plugin, version 1.0.0 | As Kairos |
 
 ## Where it stands
 

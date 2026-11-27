@@ -357,6 +357,41 @@ TEST(TemporalTest, OrderingsBetweenTimePoints)
   EXPECT_TRUE(valid("(< (end a) (start b))", "0", "5.001"));
 }
 
+TEST(TemporalTest, StartsAtOnceOfActionsThatLastDifferently)
+{
+  // Two talks start at once, one lasts longer, and the note waits for both: found with the
+  // starts and the ends apart, the times keep the orderings of the hierarchy and the starts at
+  // once (the meetings of klimax-benchmarks)
+  const std::string domain =
+    "(define (domain d) (:requirements :typing :hierarchy :durative-actions)\n"
+    " (:types worker)\n"
+    " (:predicates (free ?w - worker) (met ?a ?b - worker) (done ?w - worker))\n"
+    " (:functions (talk-time ?w - worker))\n"
+    " (:task meet :parameters (?a ?b - worker))\n"
+    " (:task work :parameters (?w - worker))\n"
+    " (:method m-meet :parameters (?a ?b - worker) :task (meet ?a ?b)\n"
+    "  :subtasks (and (x (talk ?a)) (y (talk ?b)) (z (note ?a ?b)))\n"
+    "  :ordering (and (= (start x) (start y)) (< x z) (< y z)))\n"
+    " (:method m-work :parameters (?w - worker) :task (work ?w) :subtasks (and (job ?w)))\n"
+    " (:durative-action talk :parameters (?w - worker) :duration (= ?duration (talk-time ?w))\n"
+    "  :condition (and (at start (free ?w)))\n"
+    "  :effect (and (at start (not (free ?w))) (at end (free ?w))))\n"
+    " (:durative-action note :parameters (?a ?b - worker) :duration (= ?duration 1)\n"
+    "  :condition (and (at start (free ?a))) :effect (and (at end (met ?a ?b))))\n"
+    " (:durative-action job :parameters (?w - worker) :duration (= ?duration 9)\n"
+    "  :condition (and (at start (free ?w)))\n"
+    "  :effect (and (at start (not (free ?w))) (at end (free ?w)) (at end (done ?w)))))";
+  const std::string problem =
+    "(define (problem p) (:domain d) (:objects ann bob - worker)\n"
+    " (:htn :subtasks (and (meet bob ann) (work ann)))\n"
+    " (:init (free ann) (free bob) (= (talk-time ann) 4) (= (talk-time bob) 2))\n"
+    " (:goal (and (met bob ann) (done ann))))";
+  SolveResult r = solve(domain, problem);
+  ASSERT_EQ(r.status, Status::Solved) << r.message;
+  VerifyResult v = verify(domain, problem, r.plan);
+  EXPECT_TRUE(v.valid) << v.reason << "\n" << r.plan;
+}
+
 TEST(TemporalTest, ThePlanMeetsOrderingsBetweenTimePoints)
 {
   // One action after another does not start them at once: the times of the plan do

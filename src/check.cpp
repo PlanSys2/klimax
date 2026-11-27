@@ -894,7 +894,12 @@ SolveResult solve(
     if (apart.outcome == search::Outcome::Solved &&
       without_ends(model.value(), apart.plan, clean, steps, happenings))
     {
-      const std::vector<verifier::Timed> times = schedule(model.value(), steps, happenings);
+      // What the hierarchy says of the times, from the tree of the plan
+      verifier::Order order;
+      const bool ordered = verifier::decomposition(model.value(), clean, order) &&
+        order.complete;
+      const std::vector<verifier::Timed> times =
+        schedule(model.value(), steps, happenings, ordered ? &order : nullptr);
       verifier::Tree tree;
       const verifier::Outcome checked = times.empty() ? verifier::Outcome{} :
         verifier::verify(model.value(), with_times(clean, times),

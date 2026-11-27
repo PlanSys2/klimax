@@ -53,12 +53,13 @@ struct Happening
 /**
  * @brief The same for a plan found with the starts and the ends of its durative actions in the
  * order `happenings`: Kairos gives them times that keep that order, with every action lasting
- * what it must and what must hold while it runs holding (temporal::TemporalFilter). Empty if
- * no times do.
+ * what it must and what must hold while it runs holding (temporal::TemporalFilter), and, with
+ * `order` (of the same steps), what its hierarchy says of the times: each step after those
+ * ordered before it, and the orderings between time points. Empty if no times do.
  */
 std::vector<verifier::Timed> schedule(
   const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
-  const std::vector<Happening> & happenings);
+  const std::vector<Happening> & happenings, const verifier::Order * order = nullptr);
 
 }  // namespace klimax
 

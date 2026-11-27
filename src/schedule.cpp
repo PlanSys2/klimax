@@ -199,7 +199,7 @@ std::vector<verifier::Timed> schedule(
 
 std::vector<verifier::Timed> schedule(
   const hddl::Model & model, const std::vector<verifier::Order::Action> & steps,
-  const std::vector<Happening> & happenings)
+  const std::vector<Happening> & happenings, const verifier::Order * order)
 {
   const std::optional<sas::Task> grounded = task_of(model, steps);
   if (!grounded) {
@@ -249,8 +249,31 @@ std::vector<verifier::Timed> schedule(
     }
     state = *next;
   }
+  // What the hierarchy says of the times, as bounds between happenings: where each step
+  // starts and ends among them (both at once for an instantaneous one)
+  using Bound = kairos::temporal::TemporalFilter::Bound;
+  std::vector<Bound> bounds;
+  if (order != nullptr && order->actions.size() == steps.size()) {
+    std::vector<size_t> start(steps.size(), 0), end(steps.size(), 0);
+    for (size_t k = 0; k < happenings.size(); ++k) {
+      (happenings[k].end ? end : start)[happenings[k].step] = k;
+      if (!model.tasks[steps[happenings[k].step].task].durative) {
+        end[happenings[k].step] = k;
+      }
+    }
+    for (const auto & [first, second] : order->before) {
+      bounds.push_back(Bound{end[first], start[second], 0.0});
+    }
+    constexpr double kAfter = 0.001;  // strictly later: by the epsilon of the plan
+    for (const verifier::Order::Time & t : order->times) {
+      const size_t a = (t.a.end ? end : start)[t.a.action];
+      const size_t b = (t.b.end ? end : start)[t.b.action];
+      bounds.push_back(t.op == kairos::ast::CompareOp::Eq ? Bound{a, b, 0.0, 0.0} :
+        Bound{a, b, t.op == kairos::ast::CompareOp::Lt ? kAfter : 0.0});
+    }
+  }
   kairos::temporal::TemporalFilter filter(original, snap, space, 0.001);
-  const std::optional<kairos::Plan> plan = filter.plan(actions);
+  const std::optional<kairos::Plan> plan = filter.plan(actions, bounds);
   if (!plan || plan->steps.size() != steps.size()) {
     return gave_up("Kairos finds no times for the starts and the ends in this order");
   }

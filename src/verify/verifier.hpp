@@ -106,7 +106,27 @@ struct Order
   std::vector<std::pair<uint32_t, uint32_t>> before;
   size_t limit = 300000;
   bool complete = false;
+  // What the networks say of the times of time points of actions (HDDL 2.1): when action `a`
+  // starts or ends `op` (<, <= or =) when action `b` does. Only those that hold exactly so: of a
+  // task with several actions, its end as the left side of < or <= (all of them end by then)
+  // and its start as the right side (all of them start then or later)
+  struct Point
+  {
+    uint32_t action = 0;  // position in `actions`
+    bool end = false;
+  };
+  struct Time
+  {
+    Point a;
+    Point b;
+    kairos::ast::CompareOp op = kairos::ast::CompareOp::Le;
+  };
+  std::vector<Time> times;
 };
+
+/// @brief The orderings of the decomposition of `plan` (as `Order`), from its tree alone: the
+/// plan is not executed. False if the tree is not one of the problem.
+bool decomposition(const hddl::Model & model, std::string_view plan, Order & order);
 
 /**
  * @brief Checks that `plan` solves the problem of `model` (docs/semantics.md, section 3.1).

@@ -210,6 +210,14 @@ public:
 
   void run()
   {
+    structure();
+    build_events();
+    execute();
+  }
+
+  // The tree of the plan, matched to the problem: its steps, tasks and methods
+  void structure()
+  {
     if (!m_.has_htn) {
       invalid("unsupported: a problem without :htn is a PDDL problem");
     }
@@ -231,8 +239,6 @@ public:
         match_method(n);
       }
     }
-    build_events();
-    execute();
   }
 
   // The plan as its decomposition, once run() has accepted it
@@ -281,6 +287,30 @@ public:
     }
     if (!out.complete) {
       out.before.clear();
+    }
+    // The time points: of one action, or of all those of a task where that is exact
+    auto times = [&](const hddl::Network & net, const std::vector<uint32_t> & steps) {
+        for (const hddl::TimeConstraint & t : net.times) {
+          const auto & left = leaves[steps[t.a]];
+          const auto & right = leaves[steps[t.b]];
+          const bool order = t.op != ast::CompareOp::Eq;
+          const bool left_ok = left.size() == 1 || (order && t.a_end && !left.empty());
+          const bool right_ok = right.size() == 1 || (order && !t.b_end && !right.empty());
+          if (!left_ok || !right_ok) {
+            continue;
+          }
+          for (uint32_t first : left) {
+            for (uint32_t second : right) {
+              out.times.push_back(Order::Time{{first, t.a_end}, {second, t.b_end}, t.op});
+            }
+          }
+        }
+      };
+    times(m_.initial, roots_);
+    for (const Node & n : nodes_) {
+      if (!n.primitive) {
+        times(m_.methods[n.method].network, n.children);
+      }
     }
   }
 
@@ -1968,6 +1998,18 @@ private:
 };
 
 }  // namespace
+
+bool decomposition(const hddl::Model & model, std::string_view plan, Order & order)
+{
+  try {
+    Verifier verifier(model, plan);
+    verifier.structure();
+    verifier.order(order);
+    return true;
+  } catch (const Invalid &) {
+    return false;
+  }
+}
 
 Outcome verify(const hddl::Model & model, std::string_view plan, Tree * tree, Order * order)
 {

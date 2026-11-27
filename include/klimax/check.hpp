@@ -56,6 +56,13 @@ struct Summary
   size_t initial_tasks = 0;
   bool total_order = false;  // every task network is totally ordered
   bool has_goal = false;
+  // What the domain and the problem use: the PDDL features as Kairos names them (e.g.
+  // "durative-actions", "numeric-fluents") and those of the hierarchy: "hierarchy" (an initial
+  // task network), "partial-order-initial", "partial-order-methods", "recursion",
+  // "method-preconditions", "free-method-parameters" (not bound by the task),
+  // "empty-methods", "method-constraints" (equalities and sorts), "goal", and of HDDL 2.1
+  // "durative-methods", "method-durations", "time-point-orderings", "state-constraints"
+  std::vector<std::string> features;
 };
 
 struct CheckResult

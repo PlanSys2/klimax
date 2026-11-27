@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <string>
 
 #include "klimax/check.hpp"
@@ -75,6 +76,23 @@ std::string problem(const std::string & order, const std::string & init = "")
 bool valid(const std::string & constraints, const std::string & order, const std::string & init = "")
 {
   return verify(domain(constraints), problem(order, init), plan(order)).valid;
+}
+
+bool uses(const CheckResult & r, const std::string & feature)
+{
+  const auto & f = r.summary.features;
+  return std::find(f.begin(), f.end(), feature) != f.end();
+}
+
+TEST(ConstraintsTest, AreAFeatureOfTheProblem)
+{
+  const CheckResult with = check(domain("(before w (lit))"), problem("sowc"));
+  ASSERT_TRUE(with.ok);
+  EXPECT_TRUE(uses(with, "state-constraints"));
+  EXPECT_TRUE(uses(with, "hierarchy"));
+  EXPECT_FALSE(uses(with, "goal"));
+  EXPECT_FALSE(uses(with, "recursion"));
+  EXPECT_FALSE(uses(check(domain(""), problem("sowc")), "state-constraints"));
 }
 
 TEST(ConstraintsTest, BeforeAfterBetween)

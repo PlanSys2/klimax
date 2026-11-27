@@ -65,7 +65,7 @@ if(KLIMAX_BUILD_CLI)
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl)
   set_tests_properties(cli_check PROPERTIES
-    PASS_REGULAR_EXPRESSION "actions 6, tasks 3, methods 6, objects 7, initial tasks 2, total order")
+    PASS_REGULAR_EXPRESSION "actions 6, tasks 3, methods 6, objects 7, initial tasks 2, total order\nfeatures: typing negative-preconditions hierarchy recursion method-preconditions")
   add_test(NAME cli_tree COMMAND klimax_cli
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/domain.hddl
     ${CMAKE_CURRENT_SOURCE_DIR}/data/house/p1-total-order.hddl --tree)

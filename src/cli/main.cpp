@@ -89,6 +89,11 @@ int check(const char * domain_path, const char * problem_path)
             << s.actions << ", tasks " << s.tasks << ", methods " << s.methods << ", objects "
             << s.objects << ", initial tasks " << s.initial_tasks << ", "
             << (s.total_order ? "total order" : "partial order") << "\n";
+  std::cout << "features:";
+  for (const std::string & f : s.features) {
+    std::cout << " " << f;
+  }
+  std::cout << "\n";
   return 0;
 }
 

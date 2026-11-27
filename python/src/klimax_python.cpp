@@ -66,7 +66,8 @@ NB_MODULE(_klimax, m)
   .def_ro("objects", &klimax::Summary::objects)
   .def_ro("initial_tasks", &klimax::Summary::initial_tasks)
   .def_ro("total_order", &klimax::Summary::total_order)
-  .def_ro("has_goal", &klimax::Summary::has_goal);
+  .def_ro("has_goal", &klimax::Summary::has_goal)
+  .def_ro("features", &klimax::Summary::features);
 
   nb::class_<klimax::CheckResult>(m, "CheckResult")
   .def_ro("ok", &klimax::CheckResult::ok)

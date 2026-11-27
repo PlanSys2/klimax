@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -315,6 +316,12 @@ std::string jobs_plan(const std::string & ann, const std::string & bob)
          "3 job ann -> m 1\n4 job bob -> m 2\n<==\n";
 }
 
+bool uses(const CheckResult & r, const std::string & feature)
+{
+  const auto & f = r.summary.features;
+  return std::find(f.begin(), f.end(), feature) != f.end();
+}
+
 TEST(TemporalTest, OrderingsBetweenTimePoints)
 {
   auto valid = [](const std::string & ordering, const std::string & ann, const std::string & bob) {
@@ -392,6 +399,31 @@ std::string shift_plan(const std::string & bob)
 {
   return "==>\n1 0: (work ann) [5]\n2 " + bob + ": (work bob) [5]\nroot 3\n"
          "3 shift ann bob -> both 1 2\n<==\n";
+}
+
+TEST(TemporalTest, TheFeaturesOfAProblem)
+{
+  const CheckResult kiln = check(kDomain, problem());
+  ASSERT_TRUE(kiln.ok);
+  for (const char * f : {"typing", "durative-actions", "hierarchy", "method-preconditions",
+      "goal"})
+  {
+    EXPECT_TRUE(uses(kiln, f)) << f;
+  }
+  for (const char * f : {"recursion", "partial-order-methods", "time-point-orderings",
+      "durative-methods"})
+  {
+    EXPECT_FALSE(uses(kiln, f)) << f;
+  }
+  // An ordering between time points, not one between tasks
+  EXPECT_TRUE(uses(check(kJobs, jobs("(= (start a) (start b))")), "time-point-orderings"));
+  EXPECT_FALSE(uses(check(kJobs, jobs("(< a b)")), "time-point-orderings"));
+  EXPECT_FALSE(uses(check(kJobs, jobs("(< a b)")), "partial-order-initial"));
+  const CheckResult shift = check(shifts("(<= ?duration 12)"), kShift);
+  ASSERT_TRUE(shift.ok);
+  EXPECT_TRUE(uses(shift, "durative-methods"));
+  EXPECT_TRUE(uses(shift, "method-durations"));
+  EXPECT_TRUE(uses(shift, "partial-order-methods"));
 }
 
 TEST(TemporalTest, DurationsOfMethods)

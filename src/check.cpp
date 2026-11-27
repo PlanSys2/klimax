@@ -89,6 +89,101 @@ void append(
 // its strict mode, wants the spelling of the input.
 using Spelling = std::unordered_map<std::string, std::string>;
 
+// Whether an abstract task can be decomposed, through its methods, into itself
+bool recursive(const hddl::Model & m)
+{
+  const size_t n = m.tasks.size();
+  std::vector<std::vector<uint32_t>> next(n);
+  for (const hddl::MethodInfo & method : m.methods) {
+    for (const hddl::Step & step : method.network.steps) {
+      if (!m.tasks[step.task].primitive) {
+        next[method.task.value()].push_back(step.task.value());
+      }
+    }
+  }
+  // Depth first, without recursion: 0 not seen, 1 on the path, 2 done
+  std::vector<uint8_t> state(n, 0);
+  for (uint32_t root = 0; root < n; ++root) {
+    if (state[root] != 0) {
+      continue;
+    }
+    std::vector<std::pair<uint32_t, size_t>> stack{{root, 0}};
+    state[root] = 1;
+    while (!stack.empty()) {
+      auto & [task, child] = stack.back();
+      if (child == next[task].size()) {
+        state[task] = 2;
+        stack.pop_back();
+        continue;
+      }
+      const uint32_t to = next[task][child++];
+      if (state[to] == 1) {
+        return true;
+      }
+      if (state[to] == 0) {
+        state[to] = 1;
+        stack.emplace_back(to, 0);
+      }
+    }
+  }
+  return false;
+}
+
+// The features a model uses: those of PDDL, from Kairos, and those of the hierarchy
+std::vector<std::string> features_of(const hddl::Model & m)
+{
+  std::vector<std::string> out;
+  for (uint8_t f = 0; f < static_cast<uint8_t>(kairos::sem::Feature::Count); ++f) {
+    const auto feature = static_cast<kairos::sem::Feature>(f);
+    if (m.objects.features.contains(feature)) {
+      out.emplace_back(kairos::sem::to_string(feature));
+    }
+  }
+  bool partial = false, preconditions = false, free = false, empty = false;
+  bool constraints = false, durative = false, durations = false, times = false;
+  bool states = !m.initial.states.empty();
+  for (const hddl::MethodInfo & method : m.methods) {
+    if (method.artificial) {
+      continue;
+    }
+    const hddl::Network & net = method.network;
+    partial = partial || !net.total_order;
+    preconditions = preconditions || method.precondition_action >= 0;
+    empty = empty || net.steps.empty();
+    constraints = constraints || !net.constraints.empty() || !net.sorts.empty();
+    durative = durative || method.condition.valid() || !method.durations.empty();
+    durations = durations || !method.durations.empty();
+    times = times || !net.times.empty();
+    states = states || !net.states.empty();
+    for (uint32_t p = 0; p < method.params.size() && !free; ++p) {
+      free = std::none_of(method.task_args.begin(), method.task_args.end(),
+          [p](const hddl::Arg & a) {return a.variable && a.index == p;});
+    }
+  }
+  times = times || !m.initial.times.empty();
+  const std::pair<bool, const char *> hierarchy[] = {
+    {m.has_htn, "hierarchy"},
+    {m.has_htn && !m.initial.total_order, "partial-order-initial"},
+    {partial, "partial-order-methods"},
+    {recursive(m), "recursion"},
+    {preconditions, "method-preconditions"},
+    {free, "free-method-parameters"},
+    {empty, "empty-methods"},
+    {constraints || !m.initial.constraints.empty() || !m.initial.sorts.empty(),
+      "method-constraints"},
+    {m.has_goal, "goal"},
+    {durative, "durative-methods"},
+    {durations, "method-durations"},
+    {times, "time-point-orderings"},
+    {states, "state-constraints"}};
+  for (const auto & [used, name] : hierarchy) {
+    if (used) {
+      out.emplace_back(name);
+    }
+  }
+  return out;
+}
+
 Spelling spelling_of(std::string_view domain, std::string_view problem)
 {
   Spelling spelling;
@@ -255,6 +350,7 @@ CheckResult check(
   s.initial_tasks = model->initial.steps.size();
   s.has_goal = model->has_goal;
   s.total_order = model->total_order;
+  s.features = features_of(model.value());
   result.ok = true;
   return result;
 }

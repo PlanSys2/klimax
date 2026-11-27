@@ -91,6 +91,7 @@ def test_summary():
     report = klimax.check(DOMAIN, problem)
     assert report.ok and report.summary.total_order
     assert report.summary.tasks > 0 and report.summary.methods > 0
+    assert "hierarchy" in report.summary.features and "recursion" in report.summary.features
     assert not klimax.check(DOMAIN, (DATA / "p2-partial-order.hddl").read_text()).summary.total_order
 
 

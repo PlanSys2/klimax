@@ -15,7 +15,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(klimax
-  VERSION 1.0.0
+  VERSION 1.0.1
   DESCRIPTION "HTN planner for HDDL 2.1: hierarchical, numeric and temporal"
   LANGUAGES CXX)
 

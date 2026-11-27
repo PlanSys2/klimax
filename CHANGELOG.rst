@@ -2,8 +2,8 @@
 Changelog for package klimax
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.0.1 (2026-11-27)
+------------------
 * Time: among methods that are otherwise equal, the searches try first the one whose first
   action ends soonest in a schedule of the plan so far, with the orderings of the hierarchy.
   The work goes to whoever is free first, and plans overlap more: the factory of PlanSys2's

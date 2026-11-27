@@ -16,9 +16,9 @@
   <img src="https://img.shields.io/badge/CMake-%E2%89%A5%203.22-064F8C?logo=cmake" alt="CMake 3.22 or newer">
   <img src="https://img.shields.io/badge/python-%E2%89%A5%203.10-3776AB?logo=python&amp;logoColor=white" alt="Python 3.10 or newer">
   <img src="https://img.shields.io/badge/platforms-Linux%20x86--64%20%7C%20ARM64-lightgrey" alt="Linux x86-64 and ARM64">
-  <img src="https://img.shields.io/badge/HDDL-1.0-8A2BE2" alt="HDDL 1.0">
+  <img src="https://img.shields.io/badge/HDDL-1.0%20%7C%202.1-8A2BE2" alt="HDDL 1.0 and 2.1">
+  <a href="https://pypi.org/project/klimax-planner/"><img src="https://img.shields.io/pypi/v/klimax-planner" alt="PyPI: klimax-planner"></a>
   <a href="https://github.com/PlanSys2/up-klimax"><img src="https://img.shields.io/badge/unified--planning-up--klimax-2E8B57" alt="Unified Planning engine: up-klimax"></a>
-  <img src="https://img.shields.io/badge/status-in%20development-orange" alt="Status: in development">
 </p>
 
 Klimax (Greek for *ladder*) plans with hierarchies of tasks. It reads
@@ -29,10 +29,10 @@ It is developed within the [PlanSys2](https://github.com/PlanSys2) organization,
 [Kairos](https://github.com/PlanSys2/kairos), whose modules it is built on (parser, grounder,
 Datalog engine, the evaluator and the validator of plans). It does not depend on ROS.
 
-> **Status**: in development, no release yet. Klimax plans HDDL 1.0 problems (total and partial
-> order) and those of HDDL 2.1: numeric fluents, durative actions (also ones that must run at
-> once), timed initial literals, durative methods, orderings between the starts and the ends
-> of tasks, and constraints on durations and on the states of the plan. The
+> **Status**: version 1.0.0 ([changelog](CHANGELOG.rst)). Klimax plans HDDL 1.0 problems (total
+> and partial order) and those of HDDL 2.1: numeric fluents, durative actions (also ones that
+> must run at once), timed initial literals, durative methods, orderings between the starts and
+> the ends of tasks, and constraints on durations and on the states of the plan. The
 > [roadmap](docs/roadmap.md) says what of them is checked but not yet planned with.
 
 **How it compares**: on the benchmark of the HTN tracks of IPC 2023, with every plan checked by

@@ -100,6 +100,19 @@ public:
       }
       why = clock(lifted_, [&](const std::string & name) {return steps.count(name) != 0;});
     }
+    // What each durative action lasts, if a constant, before compress() makes it one step
+    std::unordered_map<std::string, double> lasts;
+    for (const kairos::lifted::DurativeAction & d : lifted_.durative_actions) {
+      double value = 1.0;
+      for (const kairos::lifted::DurationConstraint & c : d.duration) {
+        if (c.value.op == kairos::lifted::ExprOp::Constant &&
+          (c.op == kairos::lifted::CompareOp::Eq || c.op == kairos::lifted::CompareOp::Ge))
+        {
+          value = c.value.value;
+        }
+      }
+      lasts[d.name] = value;
+    }
     if (why.empty() && !start_and_end_) {
       why = compress(lifted_);
     }
@@ -191,6 +204,13 @@ public:
         return kairos::Result<Problem>::failure(
           {kairos::Diagnostic::error("ground.unsupported", "not planned with yet: " +
             unsupported)});
+      }
+      if (!start_and_end_ && !lasts.empty()) {
+        p_.durations.assign(p_.pddl.actions.size(), 0.0);
+        for (size_t i = 0; i < p_.pddl.actions.size(); ++i) {
+          const auto found = lasts.find(p_.pddl.action_names[p_.pddl.actions[i].schema]);
+          p_.durations[i] = found == lasts.end() ? 0.0 : found->second;
+        }
       }
       p_.stats.kairos_actions = p_.pddl.actions.size();
       p_.stats.kairos_ms = since() - p_.stats.datalog_ms;

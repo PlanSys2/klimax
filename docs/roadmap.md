@@ -45,7 +45,10 @@ in [baseline.md](baseline.md).
   Kairos does with temporally simple problems, or as its start and its end where actions must
   overlap. The plan is then timed by Kairos' scheduler:
   each action as early as what it reads and writes and the orderings of the hierarchy allow,
-  so actions that neither orders run at once. Kairos' validator checks every plan as a temporal
+  so actions that neither orders run at once. While searching, among methods that are
+  otherwise equal the one whose first action ends soonest in a schedule of the plan so far is
+  tried first: the work goes to whoever is free first (a robot, a machine), and the plan overlaps
+  more. Kairos' validator checks every plan as a temporal
   plan of PDDL 2.1. The verifier reads plans with times and durations, with actions that
   overlap, and checks all that HDDL 2.1 says of time in a method: orderings between the starts
   and the ends of subtasks, durative methods with their conditions at start, over all and at
@@ -93,7 +96,8 @@ From before:
 ## Known limits
 
 - Of time: plans are found with one durative action after another, and only then made
-  shorter. Where that gives no plan (an action needs what another gives only while it runs),
+  shorter. The makespan is not minimized: the searches only prefer, among equals, what ends
+  sooner, and the anytime search shortens the plan, not its makespan. Where that gives no plan (an action needs what another gives only while it runs),
   the start and the end of each durative action are planned as two steps, and Kairos says when
   each takes place; but that search does not look at durations, so an order of starts and ends
   that no times fit is reported as not supported, as is a problem with no plan of either

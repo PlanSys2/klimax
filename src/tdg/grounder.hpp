@@ -74,6 +74,10 @@ struct Problem
   std::vector<Task> tasks;
   std::vector<Method> methods;
   std::vector<uint32_t> initial;  // the ways of instantiating the initial task network (methods)
+  // By instance in `pddl.actions`, with each durative action as one step: what it lasts (its
+  // duration if a constant, or the least it allows; 1 otherwise), 0 if instantaneous. Empty
+  // without durative actions.
+  std::vector<double> durations;
   bool unsolvable = false;        // no way of decomposing the initial tasks into actions
   size_t primitive_tasks = 0;
   Stats stats;

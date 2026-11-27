@@ -2,6 +2,15 @@
 Changelog for package klimax
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Time: among methods that are otherwise equal, the searches try first the one whose first
+  action ends soonest in a schedule of the plan so far, with the orderings of the hierarchy.
+  The work goes to whoever is free first, and plans overlap more: the factory of PlanSys2's
+  behavior tree example, three cars with three robots, went from a makespan of 90 to 45 (one
+  robot did nearly every errand); the workshop family of klimax-benchmarks, 10% shorter in all.
+* Contributors: Francisco Martín Rico
+
 1.0.0 (2026-11-27)
 ------------------
 The first release: an HTN planner for HDDL 1.0 and HDDL 2.1, built on Kairos.

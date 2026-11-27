@@ -29,6 +29,7 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -542,6 +543,7 @@ public:
     lap("orders");
     costs();
     lap("costs");
+    durations();
     metric();
     infer();
     lap("infer");
@@ -831,6 +833,174 @@ private:
       methods_.push_back(sorted(t.methods));
     }
     initial_ = sorted(p_.initial);
+  }
+
+  // --- Time --------------------------------------------------------------------------------------
+  // With durative actions, among methods that are otherwise equal the search prefers the one
+  // whose first action ends soonest in a schedule of the plan so far, each action as early as
+  // what it reads and writes allows: the work goes to whoever is free first (a robot, a
+  // machine), and the plan, timed afterwards, overlaps more. As Kairos does with the agents of
+  // PDDL plans.
+
+  // What each primitive ground task lasts (tdg::Problem::durations). Empty without time.
+  void durations()
+  {
+    if (p_.durations.empty() || std::getenv("KLIMAX_NO_TIMELINE") != nullptr) {
+      return;
+    }
+    duration_.assign(p_.tasks.size(), 0.0);
+    for (size_t t = 0; t < p_.tasks.size(); ++t) {
+      if (!p_.tasks[t].actions.empty()) {
+        duration_[t] = p_.durations[p_.tasks[t].actions[0]];
+      }
+    }
+    written_.assign(g_.atoms.size(), 0.0);
+    read_.assign(g_.atoms.size(), 0.0);
+  }
+
+  // When the action of a primitive ground task would end after the schedule in written_ and
+  // read_ (when each atom was last written, and read), starting at `floor` or later; with
+  // `commit`, it is added to it
+  double step_end(uint32_t task, bool commit, double floor)
+  {
+    if (p_.tasks[task].actions.empty()) {
+      return floor;
+    }
+    const ground::Action & a = g_.actions[p_.tasks[task].actions[0]];
+    double start = floor;
+    auto reads = [&](ground::AtomId x) {start = std::max(start, written_[x]);};
+    auto writes = [&](ground::AtomId x) {start = std::max({start, written_[x], read_[x]});};
+    std::for_each(a.precondition.positive.begin(), a.precondition.positive.end(), reads);
+    std::for_each(a.precondition.negative.begin(), a.precondition.negative.end(), reads);
+    std::for_each(a.changes.add.begin(), a.changes.add.end(), writes);
+    std::for_each(a.changes.del.begin(), a.changes.del.end(), writes);
+    for (const ground::Effect & e : a.effects) {
+      if (e.kind == ground::Effect::Kind::Add || e.kind == ground::Effect::Kind::Delete) {
+        writes(e.atom);
+      }
+    }
+    const double end = start + duration_[task];
+    if (commit) {
+      for (ground::AtomId x : a.precondition.positive) {
+        read_[x] = std::max(read_[x], end);
+      }
+      for (ground::AtomId x : a.precondition.negative) {
+        read_[x] = std::max(read_[x], end);
+      }
+      for (ground::AtomId x : a.changes.add) {
+        written_[x] = end;
+      }
+      for (ground::AtomId x : a.changes.del) {
+        written_[x] = end;
+      }
+      for (const ground::Effect & e : a.effects) {
+        if (e.kind == ground::Effect::Kind::Add || e.kind == ground::Effect::Kind::Delete) {
+          written_[e.atom] = end;
+        }
+      }
+    }
+    return end;
+  }
+
+  // The tree of the plan so far: node 0 is the root above the initial tasks
+  struct Partial
+  {
+    std::vector<std::vector<uint32_t>> kids;  // in the order of execution
+    std::vector<uint32_t> task;               // ground task; kNone for the root
+    std::vector<uint32_t> method;             // ground method applied; kNone: not yet
+    std::vector<uint8_t> done;                // an action executed
+
+    uint32_t add(uint32_t t)
+    {
+      kids.emplace_back();
+      task.push_back(t);
+      method.push_back(kNone);
+      done.push_back(0);
+      return static_cast<uint32_t>(task.size() - 1);
+    }
+  };
+
+  // Schedules the subtree of `n`, which may start at `release`, in plan order: each action as
+  // early as what it reads and writes allows, each subtask once those its method orders before
+  // it have ended. Returns when the subtree ends; `floor` gets the release of `want`.
+  double walk(const Partial & t, uint32_t n, double release, uint32_t want, double & floor)
+  {
+    if (n == want) {
+      floor = release;
+    }
+    if (t.task[n] != kNone && !p_.tasks[t.task[n]].actions.empty()) {
+      return t.done[n] ? step_end(t.task[n], true, release) : release;
+    }
+    if (t.method[n] == kNone) {
+      return release;
+    }
+    const tdg::Method & method = p_.methods[t.method[n]];
+    const hddl::Network & net = method.method == kNone ? m_.initial :
+      m_.methods[method.method].network;
+    const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
+      order_[method.method];
+    std::vector<uint32_t> position(order.size(), 0);
+    for (uint32_t k = 0; k < order.size(); ++k) {
+      position[order[k]] = k;
+    }
+    std::vector<double> ends(order.size(), release);
+    double end = release;
+    for (uint32_t k = 0; k < t.kids[n].size() && k < order.size(); ++k) {
+      double r = release;
+      for (auto [a, b] : net.order) {
+        if (b == order[k]) {
+          r = std::max(r, ends[position[a]]);
+        }
+      }
+      ends[k] = walk(t, t.kids[n][k], r, want, floor);
+      end = std::max(end, ends[k]);
+    }
+    return end;
+  }
+
+  // The schedule of the plan so far into written_ and read_; returns the release of `want`
+  double timeline(const Partial & t, uint32_t want)
+  {
+    std::fill(written_.begin(), written_.end(), 0.0);
+    std::fill(read_.begin(), read_.end(), 0.0);
+    double floor = 0.0;
+    walk(t, 0, 0.0, want, floor);
+    return floor;
+  }
+
+  // When the first action of a method would end after the schedule, the method starting at
+  // `floor`: of its first subtask, or the soonest of the methods of that subtask, two levels
+  // down. `floor` if it has none.
+  double first_end(const tdg::Method & method, double floor, int depth = 0)
+  {
+    const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
+      order_[method.method];
+    if (order.empty()) {
+      return floor;
+    }
+    const uint32_t t = method.subtasks[order[0]];
+    if (!p_.tasks[t].actions.empty()) {
+      return step_end(t, false, floor);
+    }
+    if (depth >= 2) {
+      return floor;
+    }
+    double soonest = std::numeric_limits<double>::infinity();
+    size_t looked = 0;
+    for (uint32_t m : methods_[t]) {
+      if (++looked > 32) {
+        break;
+      }
+      soonest = std::min(soonest, first_end(p_.methods[m], floor, depth + 1));
+    }
+    return std::isinf(soonest) ? floor : soonest;
+  }
+
+  // first_end() as a key: in thousandths, saturated
+  uint32_t time_key(const tdg::Method & method)
+  {
+    return duration_.empty() ? 0 :
+      static_cast<uint32_t>(std::min(first_end(method, floor_) * 1000.0, 4.0e9));
   }
 
   // What must hold when a task starts, whatever its decomposition, as literals (atom * 2, plus
@@ -2217,10 +2387,12 @@ private:
       h = std::min<uint64_t>(h, 0xffffffffull);
       // Among equals, the method that takes least by itself: what the rest of the stack also
       // needs is counted once, which hides the difference between a short way and a long one.
-      // Then the oldest (the node index breaks the tie).
+      // Then, with durative actions, the one whose first action ends soonest. Then the oldest
+      // (the node index breaks the tie).
       const uint64_t age = bf_oldest_first_ ? (own_first_ ? std::min<uint64_t>(own, 0xffffffffull) :
         bf_->nodes.size()) : 0xffffffffull - bf_->nodes.size();
-      bf_->open.emplace_back((h << 32) | age, static_cast<uint32_t>(bf_->nodes.size() - 1));
+      bf_->open.emplace_back((h << 32) | age, (uint64_t{time_key(method)} << 32) |
+        static_cast<uint32_t>(bf_->nodes.size()), static_cast<uint32_t>(bf_->nodes.size() - 1));
       std::push_heap(bf_->open.begin(), bf_->open.end(), std::greater<>());
     }
   }
@@ -2240,13 +2412,13 @@ private:
       }
       if (bf_->states.size() * sizeof(uint64_t) + bf_->cells.size() * sizeof(Cell) +
         bf_->nodes.size() * sizeof(BfNode) + bf_->exec.size() * sizeof(BfEvent) +
-        bf_->open.size() * 16 + bf_->seen.size() * 32 > kSearchMemory)
+        bf_->open.size() * 24 + bf_->seen.size() * 32 > kSearchMemory)
       {
         bf_->over = true;  // out of room: the other searches go on
         return Outcome::OutOfBudget;
       }
       std::pop_heap(bf_->open.begin(), bf_->open.end(), std::greater<>());
-      const uint32_t n = bf_->open.back().second;
+      const uint32_t n = std::get<2>(bf_->open.back());
       if (std::getenv("KLIMAX_TRACE_BEST_FIRST") != nullptr && (++bf_->pops & 1023u) == 0) {
         size_t depth = 0;
         for (uint32_t k = n; k != kNone; k = bf_->nodes[k].parent) {
@@ -2254,7 +2426,7 @@ private:
         }
         std::fprintf(stderr, "pop %llu: h %llu, %zu actions so far, open %zu\n",
           static_cast<unsigned long long>(bf_->pops),
-          static_cast<unsigned long long>(bf_->open.back().first >> 32), depth, bf_->open.size());
+          static_cast<unsigned long long>(std::get<0>(bf_->open.back()) >> 32), depth, bf_->open.size());
       }
       bf_->open.pop_back();
       ++expansions_;
@@ -2328,9 +2500,48 @@ private:
       }
       bf_->nodes[n].state = static_cast<uint32_t>(bf_->hashes.size());
       bf_store();
+      if (!duration_.empty()) {
+        floor_ = bf_timeline(n, top);
+      }
       bf_successors(n, methods, top, bf_->cells[top].next);
     }
     return Outcome::Unsolvable;
+  }
+
+  // The schedule of the path that ends in `node` (timeline()); returns the release of `cell`
+  double bf_timeline(uint32_t node, uint32_t cell)
+  {
+    std::vector<uint32_t> path;
+    for (uint32_t n = node; n != kNone; n = bf_->nodes[n].parent) {
+      path.push_back(n);
+    }
+    Partial t;
+    t.add(kNone);
+    std::unordered_map<uint32_t, uint32_t> of;  // cell -> node of t
+    auto at = [&](uint32_t c) {return c == kNone ? 0u : of.at(c);};
+    auto event = [&](const BfEvent & e) {
+        if (e.method == kNone) {
+          t.done[at(e.cell)] = 1;
+          return;
+        }
+        const uint32_t parent = at(e.cell);
+        t.method[parent] = e.method;
+        for (uint32_t k = 0; k < e.child_count; ++k) {
+          const uint32_t c = e.first_child + k;
+          of[c] = t.add(bf_->cells[c].task);
+          t.kids[parent].push_back(of[c]);
+        }
+      };
+    for (auto it = path.rbegin(); it != path.rend(); ++it) {
+      const BfNode & n = bf_->nodes[*it];
+      if (n.did_method != kNone) {
+        event(BfEvent{n.did_cell, n.did_method, n.first_child, n.child_count});
+      }
+      for (uint32_t k = 0; k < n.exec_count; ++k) {
+        event(bf_->exec[n.exec_start + k]);
+      }
+    }
+    return timeline(t, at(cell));
   }
 
   // The plan of the path that ends in `goal`, without the tasks added by parameter splitting
@@ -2442,11 +2653,11 @@ private:
     return mix(state_hash_ ^ sum);
   }
 
-  void po_push(PoNode node, uint64_t h)
+  void po_push(PoNode node, uint64_t h, uint32_t time = 0)
   {
     po_nodes_.push_back(node);
-    po_open_.emplace_back((std::min<uint64_t>(h, 0xffffffffull) << 32) | po_nodes_.size(),
-      static_cast<uint32_t>(po_nodes_.size() - 1));
+    po_open_.emplace_back((std::min<uint64_t>(h, 0xffffffffull) << 32) | time,
+      po_nodes_.size(), static_cast<uint32_t>(po_nodes_.size() - 1));
     std::push_heap(po_open_.begin(), po_open_.end(), std::greater<>());
   }
 
@@ -2524,7 +2735,7 @@ private:
       // Each search keeps what it has between turns: none may take more than its part of the
       // memory, or the others would have none
       if ((po_states_.size() + po_items_.size() + po_edges_.size()) * sizeof(uint64_t) +
-        po_nodes_.size() * sizeof(PoNode) + po_open_.size() * 16 +
+        po_nodes_.size() * sizeof(PoNode) + po_open_.size() * 24 +
         (po_seen_.size() + po_fewest_.size()) * 32 >
         kSearchMemory)
       {
@@ -2532,7 +2743,7 @@ private:
         return Outcome::OutOfBudget;
       }
       std::pop_heap(po_open_.begin(), po_open_.end(), std::greater<>());
-      const uint32_t n = po_open_.back().second;
+      const uint32_t n = std::get<2>(po_open_.back());
       po_open_.pop_back();
       ++expansions_;
       ++work_;
@@ -2581,6 +2792,9 @@ private:
         if (!possible) {
           continue;
         }
+      }
+      if (!duration_.empty()) {
+        po_timeline(n);
       }
       // The items with nothing before them
       std::vector<bool> waits(node.item_count, false);
@@ -2651,12 +2865,98 @@ private:
           child.actions = node.actions;
           po_replace(node, i, &method, child);
           if (po_keep(child)) {
-            po_push(child, without + cost);
+            // Among equals, with durative actions, the one whose first action ends soonest
+            if (!duration_.empty()) {
+              floor_ = po_release(item.id);
+            }
+            po_push(child, without + cost, time_key(method));
           }
         }
       }
     }
     return Outcome::Unsolvable;
+  }
+
+  // The schedule of the path that ends in `node` (as timeline(), in the order of the plan,
+  // which interleaves the subtasks of different tasks): in po_time_, by occurrence
+  struct PoTime
+  {
+    uint32_t parent = kNone;  // occurrence; kNone: the root
+    uint32_t step = 0;        // in the method of the parent
+    uint32_t method = kNone;  // ground method applied
+    uint32_t first_child = 0;
+    double release = 0.0;     // when it may start
+    double end = 0.0;         // when all of it has ended, so far
+  };
+
+  void po_timeline(uint32_t node)
+  {
+    std::vector<uint32_t> path;
+    for (uint32_t n = node; n != kNone; n = po_nodes_[n].parent) {
+      path.push_back(n);
+    }
+    std::fill(written_.begin(), written_.end(), 0.0);
+    std::fill(read_.begin(), read_.end(), 0.0);
+    po_time_.clear();
+    auto children = [&](uint32_t id, const PoNode & n) {
+        PoTime & me = po_time_[id];
+        me.method = n.method;
+        me.first_child = n.first_child;
+        for (uint32_t k = 0; k < n.child_count; ++k) {
+          po_time_[n.first_child + k] = PoTime{id, k, kNone, 0, 0.0, 0.0};
+        }
+      };
+    for (auto it = path.rbegin(); it != path.rend(); ++it) {
+      const PoNode & n = po_nodes_[*it];
+      if (n.root) {
+        po_time_[kNone] = PoTime{};
+        children(kNone, n);
+        continue;
+      }
+      // Available: what its method orders before it has ended
+      const double release = po_release(n.did);
+      PoTime & me = po_time_[n.did];
+      me.release = release;
+      me.end = std::max(me.end, release);
+      if (n.method != kNone) {
+        children(n.did, n);
+        continue;
+      }
+      const double end = step_end(n.did_task, true, release);
+      for (uint32_t x = n.did; ; x = po_time_[x].parent) {
+        po_time_[x].end = std::max(po_time_[x].end, end);
+        if (x == kNone) {
+          break;
+        }
+      }
+    }
+  }
+
+  // When an occurrence may start: when its parent may, and those its method orders before it
+  // have ended
+  double po_release(uint32_t id)
+  {
+    const auto found = po_time_.find(id);
+    if (found == po_time_.end() || id == kNone) {
+      return 0.0;
+    }
+    const PoTime me = found->second;
+    const PoTime & up = po_time_[me.parent];
+    double release = up.release;
+    if (up.method != kNone) {
+      const tdg::Method & method = p_.methods[up.method];
+      const hddl::Network & net = method.method == kNone ? m_.initial :
+        m_.methods[method.method].network;
+      for (auto [a, b] : net.order) {
+        if (b == me.step) {
+          const auto before = po_time_.find(up.first_child + a);
+          if (before != po_time_.end()) {
+            release = std::max(release, before->second.end);
+          }
+        }
+      }
+    }
+    return release;
   }
 
   // Under a bound on the length: false, and its network forgotten, for a node that cannot be
@@ -2802,7 +3102,23 @@ private:
     // One evaluation costs time in proportion to the size of the problem: on a large one,
     // every method is judged from the current state alone
     const bool look_ahead = out.size() <= 24 && relaxed_->operators() <= kLookAheadLimit;
-    std::vector<std::pair<uint64_t, uint32_t>> ranked;
+    std::vector<std::tuple<uint64_t, uint32_t, uint32_t>> ranked;  // cost, time, method
+    if (!duration_.empty()) {
+      // The tree in nodes_: each node's children were made together, in plan order
+      Partial t;
+      t.add(kNone);
+      for (size_t n = 1; n < nodes_.size(); ++n) {
+        t.add(nodes_[n].task);
+        t.kids[nodes_[n].parent].push_back(static_cast<uint32_t>(n));
+      }
+      for (size_t n = 0; n < nodes_.size(); ++n) {
+        t.method[n] = nodes_[n].method;
+      }
+      for (uint32_t n : executed_) {
+        t.done[n] = 1;
+      }
+      floor_ = timeline(t, task == kNone ? 0 : cells_[top_].node);
+    }
     for (uint32_t m : out) {
       const tdg::Method & method = p_.methods[m];
       const std::vector<uint32_t> & order = method.method == kNone ? initial_order_ :
@@ -2863,16 +3179,18 @@ private:
       }
       state_hash_ = hash;
       if (possible) {
-        ranked.emplace_back(cost, m);
+        ranked.emplace_back(cost, time_key(method), m);
       } else {
         ++pruned_;
       }
     }
+    // Among equals, with durative actions, the one whose first action ends soonest
     std::stable_sort(ranked.begin(), ranked.end(), [](const auto & a, const auto & b) {
-        return a.first < b.first;
+        return std::get<0>(a) != std::get<0>(b) ? std::get<0>(a) < std::get<0>(b) :
+        std::get<1>(a) < std::get<1>(b);
       });
     out.clear();
-    for (const auto & [cost, m] : ranked) {
+    for (const auto & [cost, time, m] : ranked) {
       out.push_back(m);
     }
     return out;
@@ -3075,6 +3393,10 @@ private:
   std::vector<Cell> cells_;
   std::vector<Node> nodes_;             // 0 is the root above the initial tasks
   std::vector<uint32_t> executed_;      // nodes of the actions, in plan order
+  std::vector<double> duration_;        // by ground task (durations()); empty: no time
+  std::vector<double> written_;         // by atom: when last written, in timeline()
+  std::vector<double> read_;            // by atom: when last read
+  double floor_ = 0.0;                  // when the task being decomposed may start
   uint64_t spent_ = 0;                  // what they add up to: actions, or measure_
   uint32_t top_ = kNone;
   std::vector<Choice> choices_;
@@ -3141,18 +3463,21 @@ private:
     std::vector<uint64_t> states;
     std::vector<uint64_t> hashes;
     std::vector<double> values;  // of the numeric fluents, by state
-    std::vector<std::pair<uint64_t, uint32_t>> open;
+    // Cost and what takes least by itself; time and age (best_first); the node
+    std::vector<std::tuple<uint64_t, uint64_t, uint32_t>> open;
     std::unordered_set<uint64_t> seen;
     bool over = false;  // out of room
     uint64_t pops = 0;
   };
   std::vector<PoNode> po_nodes_;
+  std::unordered_map<uint32_t, PoTime> po_time_;      // po_timeline()
   std::vector<PoItem> po_items_;
   std::vector<std::pair<uint32_t, uint32_t>> po_edges_;
   std::vector<double> po_values_;                     // the numbers of each state kept
   std::vector<uint64_t> po_states_;
   std::vector<uint64_t> po_hashes_;
-  std::vector<std::pair<uint64_t, uint32_t>> po_open_;
+  // Cost and time (time_key()); age; the node
+  std::vector<std::tuple<uint64_t, uint64_t, uint32_t>> po_open_;
   std::unordered_set<uint64_t> po_seen_;
   bool po_plain_ = false;                             // under a bound: without the heuristic
   std::unordered_map<uint64_t, uint32_t> po_fewest_;  // under a bound: fewest actions done

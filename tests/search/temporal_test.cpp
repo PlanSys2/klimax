@@ -539,5 +539,36 @@ TEST(TemporalTest, TheDecompositionSaysOrdersAndPreconditions)
   }
 }
 
+// Any robot may carry any piece: the work goes to the robot free first, so that the three
+// pieces are carried at once (one robot for all, one after another, took 15)
+TEST(TemporalTest, TheWorkGoesToWhoIsFree)
+{
+  const std::string domain =
+    "(define (domain depot) (:requirements :typing :hierarchy :durative-actions)\n"
+    " (:types robot piece) (:constants a b c - piece)\n"
+    " (:predicates (idle ?r - robot) (waiting ?p - piece) (delivered ?p - piece))\n"
+    " (:task deliver :parameters (?p - piece)) (:task deliver-all :parameters ())\n"
+    " (:method by :parameters (?p - piece ?r - robot) :task (deliver ?p)\n"
+    "  :ordered-subtasks (and (carry ?r ?p)))\n"
+    " (:method all :parameters () :task (deliver-all)\n"
+    "  :subtasks (and (t1 (deliver a)) (t2 (deliver b)) (t3 (deliver c))))\n"
+    " (:durative-action carry :parameters (?r - robot ?p - piece) :duration (= ?duration 5)\n"
+    "  :condition (and (at start (idle ?r)) (at start (waiting ?p)))\n"
+    "  :effect (and (at start (not (idle ?r))) (at start (not (waiting ?p)))\n"
+    "   (at end (idle ?r)) (at end (delivered ?p)))))";
+  auto problem = [](const std::string & htn) {
+      return "(define (problem p) (:domain depot) (:objects r1 r2 r3 - robot)\n" + htn +
+             "\n(:init (idle r1) (idle r2) (idle r3) (waiting a) (waiting b) (waiting c)))";
+    };
+  for (const char * htn : {"(:htn :subtasks (and (deliver a) (deliver b) (deliver c)))",
+      "(:htn :ordered-subtasks (and (deliver-all)))"})
+  {
+    SolveResult r = solve(domain, problem(htn));
+    ASSERT_EQ(r.status, Status::Solved) << r.message;
+    ASSERT_TRUE(r.makespan.has_value());
+    EXPECT_NEAR(*r.makespan, 5.0, 1e-9) << htn << "\n" << r.plan;
+  }
+}
+
 }  // namespace
 }  // namespace klimax
